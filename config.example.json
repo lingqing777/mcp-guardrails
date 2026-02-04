@@ -1,0 +1,111 @@
+{
+  "$schema": "./config.schema.json",
+
+  "mcpServers": {
+    "rest-api": {
+      "command": "node",
+      "args": ["/path/to/your/mcp-server/build/index.js"],
+      "env": {
+        "REST_BASE_URL": "http://localhost:8081"
+      },
+      "description": "REST API 测试工具"
+    },
+    "filesystem": {
+      "command": "npx",
+      "args": ["-y", "@anthropic/mcp-server-filesystem", "/allowed/path"],
+      "description": "文件系统访问"
+    }
+  },
+
+  "waf1": {
+    "enabled": true,
+    "mode": "block",
+
+    "rules": {
+      "sqlInjection": {"enabled": true, "severity": "high"},
+      "xss": {"enabled": true, "severity": "high"},
+      "commandInjection": {"enabled": true, "severity": "critical"},
+      "pathTraversal": {"enabled": true, "severity": "high"},
+      "sensitiveFiles": {"enabled": true, "severity": "critical"}
+    },
+
+    "detectors": {
+      "secrets": {"enabled": true, "severity": "critical"},
+      "pii": {"enabled": true, "severity": "high"},
+      "unicode": {"enabled": true, "severity": "medium"}
+    },
+
+    "rateLimit": {
+      "enabled": false,
+      "maxRequests": 100,
+      "windowMs": 60000
+    },
+
+    "rbac": {
+      "enabled": false,
+      "defaultRole": "user",
+      "roles": {
+        "admin": {
+          "allowedTools": ["*"],
+          "blockedTools": []
+        },
+        "user": {
+          "allowedTools": ["test_request", "read_file"],
+          "blockedTools": ["delete_file", "execute_command"]
+        }
+      }
+    },
+
+    "customRules": [
+      {
+        "name": "block_rm_rf",
+        "pattern": "rm\\s+-rf",
+        "category": "commandInjection",
+        "severity": "critical",
+        "message": "检测到危险的 rm -rf 命令"
+      }
+    ]
+  },
+
+  "waf2": {
+    "enabled": true,
+    "upstream": "http://localhost:3000",
+    "port": 8081,
+
+    "llm": {
+      "provider": "qwen",
+      "model": "qwen-turbo",
+      "apiKey": "${QWEN_API_KEY}",
+      "timeout": 30000
+    },
+
+    "cache": {
+      "enabled": true,
+      "maxSize": 500,
+      "ttlSeconds": 300
+    },
+
+    "requestAnalysis": {
+      "enabled": true,
+      "maxBodySize": 1000
+    },
+
+    "responseAnalysis": {
+      "enabled": true,
+      "checkSensitiveData": true,
+      "maxBodySize": 2000
+    }
+  },
+
+  "dashboard": {
+    "enabled": true,
+    "port": 8080,
+    "refreshInterval": 5000
+  },
+
+  "logging": {
+    "level": "info",
+    "file": "./logs/waf.log",
+    "console": true
+  }
+}

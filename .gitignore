@@ -1,0 +1,49 @@
+# Dependencies
+node_modules/
+__pycache__/
+*.pyc
+.venv/
+venv/
+env/
+
+# Build
+dist/
+build/
+*.egg-info/
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+.DS_Store
+
+# Logs
+*.log
+logs/
+waf2_log.json
+
+# Config (may contain secrets)
+config.json
+.env
+.env.local
+.env.*.local
+
+# Keep example config
+!config.example.json
+
+# Runtime
+*.pid
+*.sock
+
+# Cache
+.cache/
+*.cache
+
+# Testing
+coverage/
+.nyc_output/
+.pytest_cache/
+
+# Docker
+docker-compose.override.yml

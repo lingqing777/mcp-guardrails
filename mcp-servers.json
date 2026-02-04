@@ -1,0 +1,29 @@
+{
+  "mcpServers": {
+    "rest-api": {
+      "command": "node",
+      "args": ["/mnt/d/Desktop/ctf/work_game/mcp-rest-api/build/index.js"],
+      "env": {
+        "REST_BASE_URL": "http://localhost:8081"
+      }
+    }
+  },
+
+  "waf1": {
+    "enabled": true,
+    "whitelist": ["*"],
+    "blockedKeywords": [
+      "rm -rf",
+      "DROP TABLE",
+      "DELETE FROM",
+      "; cat /etc/passwd",
+      "/etc/shadow",
+      "~/.ssh"
+    ]
+  },
+
+  "waf2": {
+    "port": 8081,
+    "target": "http://localhost:3000"
+  }
+}

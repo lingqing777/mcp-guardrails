@@ -1,0 +1,30 @@
+services:
+  # 目标靶机 - Juice Shop
+  juice-shop:
+    image: bkimminich/juice-shop
+    container_name: juice-shop
+    ports:
+      - "3000:3000"
+    networks:
+      - mcp-net
+
+  # WAF2 - HTTP 层 LLM 动态检测
+  waf2:
+    build: ./waf2
+    container_name: waf2
+    ports:
+      - "8081:8081"
+    environment:
+      - UPSTREAM=http://juice-shop:3000
+      - QWEN_API_KEY=${QWEN_API_KEY:-sk-your-api-key}
+    depends_on:
+      - juice-shop
+    networks:
+      - mcp-net
+
+  # MCP Hub + WAF1 在本地运行，不在 Docker 中
+  # 启动方式: cd mcp-hub && npm install && node src/utils/cli.js --port 4000 --config mcp-servers.json
+
+networks:
+  mcp-net:
+    driver: bridge
