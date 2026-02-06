@@ -22,8 +22,17 @@ services:
     networks:
       - mcp-net
 
-  # MCP Hub + WAF1 在本地运行，不在 Docker 中
-  # 启动方式: cd mcp-hub && npm install && node src/utils/cli.js --port 4000 --config mcp-servers.json
+  # MCP Hub - 多靶机协同平台
+  mcphub:
+    build: ./mcp-hub
+    container_name: mcphub
+    networks:
+      - mcp-net
+    depends_on:
+      - juice-shop
+      - waf2
+    ports:
+      - "4000:4000"
 
 networks:
   mcp-net:

@@ -1,0 +1,2889 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>MCP Guardrails - 统一安全仪表盘</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+            background: linear-gradient(135deg, #1a1a2e 0%, #16213e 50%, #0f3460 100%);
+            min-height: 100vh;
+            color: #e4e4e4;
+        }
+
+        .header {
+            background: rgba(0, 0, 0, 0.3);
+            padding: 20px 40px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+        }
+
+        .header h1 {
+            font-size: 24px;
+            font-weight: 600;
+            background: linear-gradient(90deg, #00d4ff, #7b68ee);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            background-clip: text;
+        }
+
+        .header .status {
+            display: flex;
+            gap: 20px;
+        }
+
+        .status-item {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            font-size: 14px;
+        }
+
+        .status-dot {
+            width: 10px;
+            height: 10px;
+            border-radius: 50%;
+            animation: pulse 2s infinite;
+        }
+
+        .status-dot.online { background: #00ff88; }
+        .status-dot.offline { background: #ff4757; animation: none; }
+
+        @keyframes pulse {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.5; }
+        }
+
+        .container {
+            padding: 30px 40px;
+            max-width: 1800px;
+            margin: 0 auto;
+        }
+
+        .tabs {
+            display: flex;
+            gap: 10px;
+            margin-bottom: 30px;
+        }
+
+        .tab {
+            padding: 12px 24px;
+            background: rgba(255, 255, 255, 0.05);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            border-radius: 8px;
+            cursor: pointer;
+            transition: all 0.3s;
+            font-size: 14px;
+        }
+
+        .tab:hover {
+            background: rgba(255, 255, 255, 0.1);
+        }
+
+        .tab.active {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            border-color: transparent;
+        }
+
+        .grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+            gap: 20px;
+            margin-bottom: 30px;
+        }
+
+        .card {
+            background: rgba(255, 255, 255, 0.05);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            border-radius: 12px;
+            padding: 24px;
+            transition: transform 0.3s, box-shadow 0.3s;
+        }
+
+        .card:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 10px 40px rgba(0, 0, 0, 0.3);
+        }
+
+        .card-title {
+            font-size: 14px;
+            color: #888;
+            margin-bottom: 8px;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+        }
+
+        .card-value {
+            font-size: 36px;
+            font-weight: 700;
+            margin-bottom: 8px;
+        }
+
+        .card-value.green { color: #00ff88; }
+        .card-value.red { color: #ff4757; }
+        .card-value.blue { color: #00d4ff; }
+        .card-value.yellow { color: #ffa502; }
+        .card-value.purple { color: #a55eea; }
+
+        .card-subtitle {
+            font-size: 13px;
+            color: #666;
+        }
+
+        .section {
+            margin-bottom: 30px;
+        }
+
+        .section-title {
+            font-size: 18px;
+            margin-bottom: 16px;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+
+        .section-title::before {
+            content: '';
+            width: 4px;
+            height: 20px;
+            background: linear-gradient(180deg, #667eea 0%, #764ba2 100%);
+            border-radius: 2px;
+        }
+
+        .two-cols {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 20px;
+        }
+
+        @media (max-width: 1200px) {
+            .two-cols { grid-template-columns: 1fr; }
+        }
+
+        .panel {
+            background: rgba(255, 255, 255, 0.05);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            border-radius: 12px;
+            padding: 24px;
+        }
+
+        .panel-title {
+            font-size: 16px;
+            margin-bottom: 16px;
+            color: #ccc;
+        }
+
+        .chart-placeholder {
+            height: 200px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: #666;
+            border: 1px dashed rgba(255, 255, 255, 0.2);
+            border-radius: 8px;
+        }
+
+        .bar-chart {
+            display: flex;
+            flex-direction: column;
+            gap: 12px;
+        }
+
+        .bar-item {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+        }
+
+        .bar-label {
+            width: 140px;
+            font-size: 13px;
+            color: #aaa;
+        }
+
+        .bar-container {
+            flex: 1;
+            height: 24px;
+            background: rgba(255, 255, 255, 0.1);
+            border-radius: 4px;
+            overflow: hidden;
+        }
+
+        .bar-fill {
+            height: 100%;
+            border-radius: 4px;
+            transition: width 0.5s ease;
+            display: flex;
+            align-items: center;
+            padding-left: 8px;
+            font-size: 12px;
+            color: white;
+        }
+
+        .bar-fill.critical { background: linear-gradient(90deg, #ff4757, #ff6b6b); }
+        .bar-fill.high { background: linear-gradient(90deg, #ffa502, #ffbb33); }
+        .bar-fill.medium { background: linear-gradient(90deg, #00d4ff, #00bcd4); }
+        .bar-fill.low { background: linear-gradient(90deg, #00ff88, #26de81); }
+        .bar-fill.default { background: linear-gradient(90deg, #667eea, #764ba2); }
+
+        .detection-list {
+            max-height: 400px;
+            overflow-y: auto;
+        }
+
+        .detection-item {
+            background: rgba(0, 0, 0, 0.2);
+            border-radius: 8px;
+            padding: 16px;
+            margin-bottom: 12px;
+            border-left: 4px solid;
+        }
+
+        .detection-item.critical { border-left-color: #ff4757; }
+        .detection-item.high { border-left-color: #ffa502; }
+        .detection-item.medium { border-left-color: #00d4ff; }
+        .detection-item.low { border-left-color: #00ff88; }
+
+        .detection-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 8px;
+        }
+
+        .detection-category {
+            font-weight: 600;
+            font-size: 14px;
+        }
+
+        .detection-time {
+            font-size: 12px;
+            color: #666;
+        }
+
+        .detection-details {
+            font-size: 13px;
+            color: #aaa;
+            line-height: 1.5;
+        }
+
+        .detection-tags {
+            display: flex;
+            gap: 8px;
+            margin-top: 8px;
+            flex-wrap: wrap;
+        }
+
+        .tag {
+            padding: 4px 8px;
+            border-radius: 4px;
+            font-size: 11px;
+            background: rgba(255, 255, 255, 0.1);
+        }
+
+        .tag.owasp { background: rgba(102, 126, 234, 0.3); }
+        .tag.mitre { background: rgba(255, 165, 2, 0.3); }
+        .tag.direction { background: rgba(0, 212, 255, 0.3); }
+
+        .refresh-btn {
+            padding: 10px 20px;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            border: none;
+            border-radius: 6px;
+            color: white;
+            cursor: pointer;
+            font-size: 14px;
+            transition: opacity 0.3s;
+        }
+
+        .refresh-btn:hover {
+            opacity: 0.9;
+        }
+
+        .refresh-btn:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+        }
+
+        .action-buttons {
+            display: flex;
+            gap: 10px;
+        }
+
+        .reset-btn {
+            padding: 10px 20px;
+            background: rgba(255, 71, 87, 0.2);
+            border: 1px solid rgba(255, 71, 87, 0.5);
+            border-radius: 6px;
+            color: #ff4757;
+            cursor: pointer;
+            font-size: 14px;
+            transition: all 0.3s;
+        }
+
+        .reset-btn:hover {
+            background: rgba(255, 71, 87, 0.3);
+        }
+
+        .loading {
+            display: inline-block;
+            width: 20px;
+            height: 20px;
+            border: 2px solid rgba(255, 255, 255, 0.3);
+            border-radius: 50%;
+            border-top-color: #fff;
+            animation: spin 1s linear infinite;
+        }
+
+        @keyframes spin {
+            to { transform: rotate(360deg); }
+        }
+
+        .config-panel {
+            background: rgba(0, 0, 0, 0.2);
+            border-radius: 8px;
+            padding: 16px;
+            margin-top: 20px;
+        }
+
+        .config-row {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            margin-bottom: 12px;
+        }
+
+        .config-label {
+            width: 100px;
+            font-size: 13px;
+            color: #888;
+        }
+
+        .config-input {
+            flex: 1;
+            padding: 8px 12px;
+            background: rgba(255, 255, 255, 0.1);
+            border: 1px solid rgba(255, 255, 255, 0.2);
+            border-radius: 6px;
+            color: white;
+            font-size: 13px;
+        }
+
+        .config-input:focus {
+            outline: none;
+            border-color: #667eea;
+        }
+
+        .empty-state {
+            text-align: center;
+            padding: 40px;
+            color: #666;
+        }
+
+        .waf-badge {
+            display: inline-block;
+            padding: 2px 8px;
+            border-radius: 4px;
+            font-size: 11px;
+            font-weight: 600;
+            margin-left: 8px;
+        }
+
+        .waf-badge.waf1 { background: #667eea; }
+        .waf-badge.waf2 { background: #764ba2; }
+
+        .severity-badge {
+            display: inline-block;
+            padding: 2px 8px;
+            border-radius: 4px;
+            font-size: 11px;
+            font-weight: 600;
+        }
+
+        .severity-badge.critical { background: #ff4757; }
+        .severity-badge.high { background: #ffa502; color: #000; }
+        .severity-badge.medium { background: #00d4ff; color: #000; }
+        .severity-badge.low { background: #00ff88; color: #000; }
+
+        /* MCP Server 卡片样式 */
+        .server-card {
+            background: rgba(255, 255, 255, 0.05);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            border-radius: 12px;
+            padding: 20px;
+            cursor: pointer;
+            transition: all 0.3s;
+        }
+
+        .server-card:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 10px 40px rgba(0, 0, 0, 0.3);
+            border-color: #667eea;
+        }
+
+        .server-card.selected {
+            border-color: #667eea;
+            background: rgba(102, 126, 234, 0.1);
+        }
+
+        .server-card .server-name {
+            font-size: 18px;
+            font-weight: 600;
+            margin-bottom: 8px;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+
+        .server-card .server-status {
+            display: inline-block;
+            padding: 2px 8px;
+            border-radius: 4px;
+            font-size: 11px;
+            font-weight: 600;
+        }
+
+        .server-card .server-status.connected { background: #00ff88; color: #000; }
+        .server-card .server-status.disconnected { background: #ff4757; }
+        .server-card .server-status.connecting { background: #ffa502; color: #000; }
+
+        .server-card .server-info {
+            font-size: 13px;
+            color: #888;
+            margin-bottom: 12px;
+        }
+
+        .server-card .server-tools {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 6px;
+        }
+
+        .server-card .tool-badge {
+            padding: 4px 8px;
+            background: rgba(102, 126, 234, 0.2);
+            border-radius: 4px;
+            font-size: 11px;
+            color: #aaa;
+        }
+
+        .tools-container {
+            display: flex;
+            flex-direction: column;
+            gap: 12px;
+            max-height: 400px;
+            overflow-y: auto;
+        }
+
+        .tool-item {
+            background: rgba(0, 0, 0, 0.2);
+            border-radius: 8px;
+            padding: 16px;
+            border-left: 4px solid #667eea;
+        }
+
+        .tool-item .tool-name {
+            font-weight: 600;
+            font-size: 14px;
+            margin-bottom: 8px;
+            color: #00d4ff;
+        }
+
+        .tool-item .tool-desc {
+            font-size: 13px;
+            color: #aaa;
+            line-height: 1.5;
+            margin-bottom: 8px;
+        }
+
+        .tool-item .tool-params {
+            font-size: 12px;
+            color: #666;
+        }
+
+        .tool-item .tool-params code {
+            background: rgba(255, 255, 255, 0.1);
+            padding: 2px 6px;
+            border-radius: 3px;
+            color: #ffa502;
+        }
+
+        /* Inspector 风格布局 */
+        .inspector-layout {
+            display: flex;
+            gap: 20px;
+            min-height: 500px;
+        }
+
+        .inspector-sidebar {
+            width: 280px;
+            flex-shrink: 0;
+            background: rgba(255, 255, 255, 0.03);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            border-radius: 12px;
+            overflow: hidden;
+        }
+
+        .sidebar-header {
+            padding: 16px;
+            background: rgba(0, 0, 0, 0.2);
+            border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            font-weight: 600;
+        }
+
+        .icon-btn {
+            background: transparent;
+            border: none;
+            color: #888;
+            cursor: pointer;
+            font-size: 18px;
+            padding: 4px 8px;
+            border-radius: 4px;
+            transition: all 0.2s;
+        }
+
+        .icon-btn:hover {
+            background: rgba(255, 255, 255, 0.1);
+            color: #fff;
+        }
+
+        .server-list {
+            max-height: 450px;
+            overflow-y: auto;
+        }
+
+        .server-list-item {
+            padding: 14px 16px;
+            border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+
+        .server-list-item:hover {
+            background: rgba(255, 255, 255, 0.05);
+        }
+
+        .server-list-item.selected {
+            background: rgba(102, 126, 234, 0.15);
+            border-left: 3px solid #667eea;
+        }
+
+        .server-list-item .name {
+            font-weight: 500;
+            margin-bottom: 4px;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .server-list-item .meta {
+            font-size: 12px;
+            color: #666;
+        }
+
+        .inspector-main {
+            flex: 1;
+            background: rgba(255, 255, 255, 0.03);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            border-radius: 12px;
+            overflow: hidden;
+        }
+
+        .server-header {
+            padding: 20px;
+            background: rgba(0, 0, 0, 0.2);
+            border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+        }
+
+        .server-title {
+            font-size: 20px;
+            font-weight: 600;
+            margin-bottom: 8px;
+            display: flex;
+            align-items: center;
+            gap: 12px;
+        }
+
+        .server-meta {
+            display: flex;
+            gap: 24px;
+            font-size: 13px;
+            color: #888;
+        }
+
+        .inspector-tabs {
+            display: flex;
+            background: rgba(0, 0, 0, 0.1);
+            border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+        }
+
+        .inspector-tab {
+            padding: 12px 24px;
+            cursor: pointer;
+            font-size: 14px;
+            color: #888;
+            border-bottom: 2px solid transparent;
+            transition: all 0.2s;
+        }
+
+        .inspector-tab:hover {
+            color: #ccc;
+            background: rgba(255, 255, 255, 0.03);
+        }
+
+        .inspector-tab.active {
+            color: #fff;
+            border-bottom-color: #667eea;
+        }
+
+        .inspector-tab-content {
+            padding: 20px;
+            max-height: 350px;
+            overflow-y: auto;
+        }
+
+        .tools-grid {
+            display: flex;
+            flex-direction: column;
+            gap: 12px;
+        }
+
+        .tool-card {
+            background: rgba(0, 0, 0, 0.2);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            border-radius: 8px;
+            padding: 16px;
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+
+        .tool-card:hover {
+            border-color: #667eea;
+            background: rgba(102, 126, 234, 0.1);
+        }
+
+        .tool-card .tool-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 8px;
+        }
+
+        .tool-card .tool-name {
+            font-weight: 600;
+            color: #00d4ff;
+            font-size: 14px;
+        }
+
+        .tool-card .test-btn {
+            padding: 4px 12px;
+            background: rgba(102, 126, 234, 0.3);
+            border: none;
+            border-radius: 4px;
+            color: #fff;
+            font-size: 12px;
+            cursor: pointer;
+        }
+
+        .tool-card .test-btn:hover {
+            background: rgba(102, 126, 234, 0.5);
+        }
+
+        .tool-card .tool-desc {
+            font-size: 13px;
+            color: #888;
+            line-height: 1.4;
+            margin-bottom: 8px;
+        }
+
+        .tool-card .tool-params-preview {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 6px;
+        }
+
+        .tool-card .param-badge {
+            padding: 2px 8px;
+            background: rgba(255, 165, 2, 0.2);
+            border-radius: 4px;
+            font-size: 11px;
+            color: #ffa502;
+        }
+
+        .tool-card .param-badge.required {
+            background: rgba(255, 71, 87, 0.2);
+            color: #ff4757;
+        }
+
+        /* Resource 列表样式 */
+        .resource-item {
+            background: rgba(0, 0, 0, 0.2);
+            border-radius: 8px;
+            padding: 14px;
+            margin-bottom: 10px;
+            border-left: 3px solid #00ff88;
+        }
+
+        .resource-item .resource-name {
+            font-weight: 500;
+            margin-bottom: 4px;
+        }
+
+        .resource-item .resource-uri {
+            font-size: 12px;
+            color: #00d4ff;
+            font-family: monospace;
+        }
+
+        .resource-item .resource-mime {
+            font-size: 11px;
+            color: #666;
+            margin-top: 4px;
+        }
+
+        /* Prompt 列表样式 */
+        .prompt-item {
+            background: rgba(0, 0, 0, 0.2);
+            border-radius: 8px;
+            padding: 14px;
+            margin-bottom: 10px;
+            border-left: 3px solid #a55eea;
+        }
+
+        .prompt-item .prompt-name {
+            font-weight: 500;
+            margin-bottom: 4px;
+        }
+
+        .prompt-item .prompt-desc {
+            font-size: 13px;
+            color: #888;
+        }
+
+        /* 工具测试面板 */
+        .tool-test-panel {
+            position: fixed;
+            bottom: 0;
+            left: 0;
+            right: 0;
+            background: rgba(20, 20, 35, 0.98);
+            border-top: 1px solid rgba(255, 255, 255, 0.1);
+            box-shadow: 0 -10px 40px rgba(0, 0, 0, 0.5);
+            z-index: 1000;
+            max-height: 50vh;
+            overflow: hidden;
+        }
+
+        .test-panel-header {
+            padding: 12px 20px;
+            background: rgba(0, 0, 0, 0.3);
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+        }
+
+        .test-panel-body {
+            padding: 20px;
+            display: flex;
+            gap: 20px;
+            align-items: flex-start;
+        }
+
+        .test-form {
+            flex: 1;
+            display: flex;
+            flex-wrap: wrap;
+            gap: 12px;
+        }
+
+        .test-form .form-group {
+            display: flex;
+            flex-direction: column;
+            gap: 4px;
+            min-width: 200px;
+        }
+
+        .test-form label {
+            font-size: 12px;
+            color: #888;
+        }
+
+        .test-form label .required {
+            color: #ff4757;
+        }
+
+        .test-form input, .test-form textarea, .test-form select {
+            padding: 8px 12px;
+            background: rgba(255, 255, 255, 0.1);
+            border: 1px solid rgba(255, 255, 255, 0.2);
+            border-radius: 6px;
+            color: #fff;
+            font-size: 13px;
+        }
+
+        .test-form input:focus, .test-form textarea:focus {
+            outline: none;
+            border-color: #667eea;
+        }
+
+        .test-result {
+            padding: 0 20px 20px;
+        }
+
+        .result-label {
+            font-size: 12px;
+            color: #888;
+            margin-bottom: 8px;
+        }
+
+        .test-result pre {
+            background: rgba(0, 0, 0, 0.3);
+            padding: 16px;
+            border-radius: 8px;
+            font-family: 'Monaco', 'Menlo', monospace;
+            font-size: 12px;
+            max-height: 150px;
+            overflow: auto;
+            color: #00ff88;
+            white-space: pre-wrap;
+            word-break: break-all;
+        }
+
+        .test-result pre.error {
+            color: #ff4757;
+        }
+
+        /* ==================== cc-switch 风格配置面板 ==================== */
+
+        /* 手风琴容器 */
+        .accordion {
+            display: flex;
+            flex-direction: column;
+            gap: 16px;
+        }
+
+        .accordion-item {
+            background: rgba(255, 255, 255, 0.03);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            border-radius: 12px;
+            overflow: hidden;
+            transition: all 0.3s;
+        }
+
+        .accordion-item:hover {
+            border-color: rgba(102, 126, 234, 0.3);
+        }
+
+        .accordion-item.expanded {
+            border-color: rgba(102, 126, 234, 0.5);
+            box-shadow: 0 4px 20px rgba(102, 126, 234, 0.1);
+        }
+
+        .accordion-header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 16px 20px;
+            cursor: pointer;
+            background: rgba(0, 0, 0, 0.2);
+            transition: background 0.2s;
+        }
+
+        .accordion-header:hover {
+            background: rgba(0, 0, 0, 0.3);
+        }
+
+        .accordion-header-left {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+        }
+
+        .accordion-icon {
+            width: 36px;
+            height: 36px;
+            border-radius: 8px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 18px;
+        }
+
+        .accordion-icon.waf1 { background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); }
+        .accordion-icon.waf2 { background: linear-gradient(135deg, #f093fb 0%, #f5576c 100%); }
+        .accordion-icon.api { background: linear-gradient(135deg, #4facfe 0%, #00f2fe 100%); }
+        .accordion-icon.data { background: linear-gradient(135deg, #43e97b 0%, #38f9d7 100%); }
+
+        .accordion-title {
+            font-weight: 600;
+            font-size: 15px;
+        }
+
+        .accordion-subtitle {
+            font-size: 12px;
+            color: #888;
+            margin-top: 2px;
+        }
+
+        .accordion-header-right {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+        }
+
+        .accordion-status {
+            padding: 4px 10px;
+            border-radius: 20px;
+            font-size: 11px;
+            font-weight: 600;
+        }
+
+        .accordion-status.active {
+            background: rgba(0, 255, 136, 0.2);
+            color: #00ff88;
+        }
+
+        .accordion-status.inactive {
+            background: rgba(255, 71, 87, 0.2);
+            color: #ff4757;
+        }
+
+        .accordion-status.partial {
+            background: rgba(255, 165, 2, 0.2);
+            color: #ffa502;
+        }
+
+        .accordion-chevron {
+            font-size: 14px;
+            color: #666;
+            transition: transform 0.3s;
+        }
+
+        .accordion-item.expanded .accordion-chevron {
+            transform: rotate(180deg);
+        }
+
+        .accordion-content {
+            max-height: 0;
+            overflow: hidden;
+            transition: max-height 0.3s ease-out;
+        }
+
+        .accordion-item.expanded .accordion-content {
+            max-height: 800px;
+        }
+
+        .accordion-body {
+            padding: 20px;
+            border-top: 1px solid rgba(255, 255, 255, 0.05);
+        }
+
+        /* 开关切换组件 */
+        .switch-group {
+            display: flex;
+            flex-direction: column;
+            gap: 12px;
+        }
+
+        .switch-item {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 12px 16px;
+            background: rgba(0, 0, 0, 0.2);
+            border-radius: 8px;
+            transition: background 0.2s;
+        }
+
+        .switch-item:hover {
+            background: rgba(0, 0, 0, 0.3);
+        }
+
+        .switch-item-left {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+        }
+
+        .switch-item-icon {
+            width: 32px;
+            height: 32px;
+            border-radius: 6px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 14px;
+            background: rgba(255, 255, 255, 0.1);
+        }
+
+        .switch-item-icon.critical { background: rgba(255, 71, 87, 0.3); color: #ff4757; }
+        .switch-item-icon.high { background: rgba(255, 165, 2, 0.3); color: #ffa502; }
+        .switch-item-icon.medium { background: rgba(0, 212, 255, 0.3); color: #00d4ff; }
+        .switch-item-icon.low { background: rgba(0, 255, 136, 0.3); color: #00ff88; }
+
+        .switch-item-info {
+            flex: 1;
+        }
+
+        .switch-item-title {
+            font-size: 14px;
+            font-weight: 500;
+            margin-bottom: 2px;
+        }
+
+        .switch-item-desc {
+            font-size: 12px;
+            color: #666;
+        }
+
+        .switch-item-right {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+        }
+
+        .severity-tag {
+            padding: 2px 8px;
+            border-radius: 4px;
+            font-size: 10px;
+            font-weight: 600;
+            text-transform: uppercase;
+        }
+
+        .severity-tag.critical { background: rgba(255, 71, 87, 0.3); color: #ff4757; }
+        .severity-tag.high { background: rgba(255, 165, 2, 0.3); color: #ffa502; }
+        .severity-tag.medium { background: rgba(0, 212, 255, 0.3); color: #00d4ff; }
+        .severity-tag.low { background: rgba(0, 255, 136, 0.3); color: #00ff88; }
+
+        /* 开关按钮 */
+        .toggle-switch {
+            position: relative;
+            width: 44px;
+            height: 24px;
+            background: rgba(255, 255, 255, 0.1);
+            border-radius: 12px;
+            cursor: pointer;
+            transition: background 0.3s;
+        }
+
+        .toggle-switch.active {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+        }
+
+        .toggle-switch::after {
+            content: '';
+            position: absolute;
+            top: 2px;
+            left: 2px;
+            width: 20px;
+            height: 20px;
+            background: white;
+            border-radius: 50%;
+            transition: transform 0.3s;
+            box-shadow: 0 2px 4px rgba(0, 0, 0, 0.2);
+        }
+
+        .toggle-switch.active::after {
+            transform: translateX(20px);
+        }
+
+        /* 配置输入组 */
+        .config-group {
+            display: flex;
+            flex-direction: column;
+            gap: 16px;
+        }
+
+        .config-field {
+            display: flex;
+            flex-direction: column;
+            gap: 6px;
+        }
+
+        .config-field label {
+            font-size: 13px;
+            color: #aaa;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .config-field label .hint {
+            font-size: 11px;
+            color: #666;
+            font-weight: normal;
+        }
+
+        .config-field input,
+        .config-field select {
+            padding: 10px 14px;
+            background: rgba(0, 0, 0, 0.3);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            border-radius: 8px;
+            color: white;
+            font-size: 14px;
+            transition: border-color 0.2s, box-shadow 0.2s;
+        }
+
+        .config-field input:focus,
+        .config-field select:focus {
+            outline: none;
+            border-color: #667eea;
+            box-shadow: 0 0 0 3px rgba(102, 126, 234, 0.1);
+        }
+
+        .config-field input::placeholder {
+            color: #555;
+        }
+
+        /* 配置行 (水平布局) */
+        .config-row-inline {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 16px;
+        }
+
+        /* 动作按钮组 */
+        .action-group {
+            display: flex;
+            gap: 12px;
+            margin-top: 16px;
+            padding-top: 16px;
+            border-top: 1px solid rgba(255, 255, 255, 0.05);
+        }
+
+        .btn {
+            padding: 10px 20px;
+            border-radius: 8px;
+            font-size: 13px;
+            font-weight: 500;
+            cursor: pointer;
+            transition: all 0.2s;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            border: none;
+        }
+
+        .btn-primary {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+        }
+
+        .btn-primary:hover {
+            opacity: 0.9;
+            transform: translateY(-1px);
+        }
+
+        .btn-secondary {
+            background: rgba(255, 255, 255, 0.1);
+            color: #ccc;
+            border: 1px solid rgba(255, 255, 255, 0.1);
+        }
+
+        .btn-secondary:hover {
+            background: rgba(255, 255, 255, 0.15);
+            color: white;
+        }
+
+        .btn-danger {
+            background: rgba(255, 71, 87, 0.2);
+            color: #ff4757;
+            border: 1px solid rgba(255, 71, 87, 0.3);
+        }
+
+        .btn-danger:hover {
+            background: rgba(255, 71, 87, 0.3);
+        }
+
+        .btn-success {
+            background: rgba(0, 255, 136, 0.2);
+            color: #00ff88;
+            border: 1px solid rgba(0, 255, 136, 0.3);
+        }
+
+        .btn-success:hover {
+            background: rgba(0, 255, 136, 0.3);
+        }
+
+        .btn:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+        }
+
+        /* 状态提示 */
+        .status-message {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            padding: 12px 16px;
+            border-radius: 8px;
+            font-size: 13px;
+            margin-top: 12px;
+        }
+
+        .status-message.success {
+            background: rgba(0, 255, 136, 0.1);
+            border: 1px solid rgba(0, 255, 136, 0.3);
+            color: #00ff88;
+        }
+
+        .status-message.error {
+            background: rgba(255, 71, 87, 0.1);
+            border: 1px solid rgba(255, 71, 87, 0.3);
+            color: #ff4757;
+        }
+
+        .status-message.warning {
+            background: rgba(255, 165, 2, 0.1);
+            border: 1px solid rgba(255, 165, 2, 0.3);
+            color: #ffa502;
+        }
+
+        .status-message.info {
+            background: rgba(0, 212, 255, 0.1);
+            border: 1px solid rgba(0, 212, 255, 0.3);
+            color: #00d4ff;
+        }
+
+        /* 分隔标题 */
+        .section-divider {
+            font-size: 11px;
+            color: #666;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+            margin: 16px 0 12px;
+            padding-bottom: 8px;
+            border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+        }
+
+        /* 统计卡片 (小型) */
+        .mini-stats {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
+            gap: 12px;
+            margin-bottom: 16px;
+        }
+
+        .mini-stat-card {
+            background: rgba(0, 0, 0, 0.2);
+            border-radius: 8px;
+            padding: 12px;
+            text-align: center;
+        }
+
+        .mini-stat-value {
+            font-size: 24px;
+            font-weight: 700;
+            margin-bottom: 4px;
+        }
+
+        .mini-stat-value.green { color: #00ff88; }
+        .mini-stat-value.red { color: #ff4757; }
+        .mini-stat-value.blue { color: #00d4ff; }
+        .mini-stat-value.purple { color: #a55eea; }
+
+        .mini-stat-label {
+            font-size: 11px;
+            color: #666;
+        }
+
+        /* LLM 模型选择器 */
+        .model-selector {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+            gap: 10px;
+        }
+
+        .model-option {
+            padding: 12px;
+            background: rgba(0, 0, 0, 0.2);
+            border: 2px solid transparent;
+            border-radius: 8px;
+            cursor: pointer;
+            transition: all 0.2s;
+            text-align: center;
+        }
+
+        .model-option:hover {
+            background: rgba(0, 0, 0, 0.3);
+        }
+
+        .model-option.selected {
+            border-color: #667eea;
+            background: rgba(102, 126, 234, 0.1);
+        }
+
+        .model-option .model-name {
+            font-weight: 600;
+            font-size: 14px;
+            margin-bottom: 4px;
+        }
+
+        .model-option .model-desc {
+            font-size: 11px;
+            color: #666;
+        }
+    </style>
+</head>
+<body>
+    <div class="header">
+        <h1>MCP Guardrails Security Dashboard</h1>
+        <div class="status">
+            <div class="status-item">
+                <span class="status-dot" id="waf1-status"></span>
+                <span>WAF1 (MCP Layer)</span>
+            </div>
+            <div class="status-item">
+                <span class="status-dot" id="waf2-status"></span>
+                <span>WAF2 (HTTP Layer)</span>
+            </div>
+        </div>
+    </div>
+
+    <div class="container">
+        <div class="tabs">
+            <div class="tab active" data-tab="overview">总览</div>
+            <div class="tab" data-tab="servers">MCP Servers</div>
+            <div class="tab" data-tab="waf1">WAF1 详情</div>
+            <div class="tab" data-tab="waf2">WAF2 详情</div>
+            <div class="tab" data-tab="detections">检测记录</div>
+            <div class="tab" data-tab="config">配置</div>
+        </div>
+
+        <!-- 总览面板 -->
+        <div id="overview-panel" class="tab-content">
+            <div class="section">
+                <div class="section-title">实时统计</div>
+                <div class="grid">
+                    <div class="card">
+                        <div class="card-title">总请求数</div>
+                        <div class="card-value blue" id="total-requests">-</div>
+                        <div class="card-subtitle">WAF1 + WAF2</div>
+                    </div>
+                    <div class="card">
+                        <div class="card-title">已拦截</div>
+                        <div class="card-value red" id="total-blocked">-</div>
+                        <div class="card-subtitle">检测到的威胁</div>
+                    </div>
+                    <div class="card">
+                        <div class="card-title">已放行</div>
+                        <div class="card-value green" id="total-passed">-</div>
+                        <div class="card-subtitle">安全请求</div>
+                    </div>
+                    <div class="card">
+                        <div class="card-title">拦截率</div>
+                        <div class="card-value yellow" id="block-rate">-</div>
+                        <div class="card-subtitle">威胁检测率</div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="section">
+                <div class="section-title">WAF 分层统计</div>
+                <div class="grid">
+                    <div class="card">
+                        <div class="card-title">WAF1 - MCP 协议层</div>
+                        <div class="card-value purple" id="waf1-blocked">-</div>
+                        <div class="card-subtitle" id="waf1-detail">静态规则检测</div>
+                    </div>
+                    <div class="card">
+                        <div class="card-title">WAF2 - HTTP 流量层</div>
+                        <div class="card-value purple" id="waf2-blocked">-</div>
+                        <div class="card-subtitle" id="waf2-detail">LLM 动态检测</div>
+                    </div>
+                    <div class="card">
+                        <div class="card-title">WAF2 缓存命中率</div>
+                        <div class="card-value green" id="cache-hit-rate">-</div>
+                        <div class="card-subtitle" id="cache-detail">LLM 调用优化</div>
+                    </div>
+                    <div class="card">
+                        <div class="card-title">平均延迟</div>
+                        <div class="card-value blue" id="avg-latency">-</div>
+                        <div class="card-subtitle">WAF2 处理时间</div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="two-cols">
+                <div class="panel">
+                    <div class="panel-title">按攻击类型分布</div>
+                    <div class="bar-chart" id="category-chart">
+                        <div class="empty-state">暂无数据</div>
+                    </div>
+                </div>
+                <div class="panel">
+                    <div class="panel-title">按严重等级分布</div>
+                    <div class="bar-chart" id="severity-chart">
+                        <div class="empty-state">暂无数据</div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- MCP Servers 管理面板 (参考 MCP Inspector 设计) -->
+        <div id="servers-panel" class="tab-content" style="display: none;">
+            <!-- 左侧：Server 列表 -->
+            <div class="inspector-layout">
+                <div class="inspector-sidebar">
+                    <div class="sidebar-header">
+                        <span>MCP Servers</span>
+                        <button class="icon-btn" onclick="fetchMcpServers()" title="刷新">&#8635;</button>
+                    </div>
+                    <div class="server-list" id="servers-list">
+                        <div class="empty-state">正在加载...</div>
+                    </div>
+                </div>
+
+                <!-- 右侧：Server 详情 -->
+                <div class="inspector-main">
+                    <div id="server-detail-empty" class="empty-state" style="padding: 60px;">
+                        选择一个 MCP Server 查看详情
+                    </div>
+
+                    <div id="server-detail" style="display: none;">
+                        <!-- Server 信息头 -->
+                        <div class="server-header">
+                            <div class="server-title">
+                                <span id="detail-server-name">-</span>
+                                <span class="server-status" id="detail-server-status">-</span>
+                            </div>
+                            <div class="server-meta">
+                                <span>版本: <span id="detail-version">-</span></span>
+                                <span>运行时间: <span id="detail-uptime">-</span></span>
+                                <span>传输: <span id="detail-transport">-</span></span>
+                            </div>
+                        </div>
+
+                        <!-- Inspector 风格的子标签 -->
+                        <div class="inspector-tabs">
+                            <div class="inspector-tab active" data-stab="tools">Tools</div>
+                            <div class="inspector-tab" data-stab="resources">Resources</div>
+                            <div class="inspector-tab" data-stab="prompts">Prompts</div>
+                        </div>
+
+                        <!-- Tools 面板 -->
+                        <div id="stab-tools" class="inspector-tab-content">
+                            <div class="tools-grid" id="tools-list">
+                                <div class="empty-state">暂无工具</div>
+                            </div>
+                        </div>
+
+                        <!-- Resources 面板 -->
+                        <div id="stab-resources" class="inspector-tab-content" style="display: none;">
+                            <div class="resources-list" id="resources-list">
+                                <div class="empty-state">暂无资源</div>
+                            </div>
+                        </div>
+
+                        <!-- Prompts 面板 -->
+                        <div id="stab-prompts" class="inspector-tab-content" style="display: none;">
+                            <div class="prompts-list" id="prompts-list">
+                                <div class="empty-state">暂无提示词模板</div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- 工具测试面板 -->
+            <div id="tool-test-panel" class="tool-test-panel" style="display: none;">
+                <div class="test-panel-header">
+                    <span>测试工具: <strong id="test-tool-name">-</strong></span>
+                    <button class="icon-btn" onclick="closeToolTest()">✕</button>
+                </div>
+                <div class="test-panel-body">
+                    <div class="test-form" id="test-form">
+                        <!-- 动态生成参数表单 -->
+                    </div>
+                    <button class="refresh-btn" onclick="executeToolTest()">执行</button>
+                </div>
+                <div class="test-result" id="test-result">
+                    <div class="result-label">响应结果</div>
+                    <pre id="test-output">等待执行...</pre>
+                </div>
+            </div>
+        </div>
+
+        <!-- WAF1 详情面板 -->
+        <div id="waf1-panel" class="tab-content" style="display: none;">
+            <div class="section">
+                <div class="section-title">WAF1 统计</div>
+                <div class="grid">
+                    <div class="card">
+                        <div class="card-title">总请求</div>
+                        <div class="card-value blue" id="waf1-total">-</div>
+                    </div>
+                    <div class="card">
+                        <div class="card-title">已拦截</div>
+                        <div class="card-value red" id="waf1-blocked-detail">-</div>
+                    </div>
+                    <div class="card">
+                        <div class="card-title">已放行</div>
+                        <div class="card-value green" id="waf1-passed">-</div>
+                    </div>
+                    <div class="card">
+                        <div class="card-title">限流触发</div>
+                        <div class="card-value yellow" id="waf1-ratelimit">-</div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="two-cols">
+                <div class="panel">
+                    <div class="panel-title">WAF1 攻击类型</div>
+                    <div class="bar-chart" id="waf1-category-chart">
+                        <div class="empty-state">暂无数据</div>
+                    </div>
+                </div>
+                <div class="panel">
+                    <div class="panel-title">WAF1 检测记录</div>
+                    <div class="detection-list" id="waf1-detections">
+                        <div class="empty-state">暂无检测记录</div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- WAF2 详情面板 -->
+        <div id="waf2-panel" class="tab-content" style="display: none;">
+            <div class="section">
+                <div class="section-title">WAF2 统计</div>
+                <div class="grid">
+                    <div class="card">
+                        <div class="card-title">总请求</div>
+                        <div class="card-value blue" id="waf2-total">-</div>
+                    </div>
+                    <div class="card">
+                        <div class="card-title">请求拦截</div>
+                        <div class="card-value red" id="waf2-blocked-req">-</div>
+                    </div>
+                    <div class="card">
+                        <div class="card-title">响应拦截</div>
+                        <div class="card-value red" id="waf2-blocked-resp">-</div>
+                    </div>
+                    <div class="card">
+                        <div class="card-title">LLM 调用</div>
+                        <div class="card-value purple" id="waf2-llm-calls">-</div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="two-cols">
+                <div class="panel">
+                    <div class="panel-title">WAF2 攻击类型</div>
+                    <div class="bar-chart" id="waf2-category-chart">
+                        <div class="empty-state">暂无数据</div>
+                    </div>
+                </div>
+                <div class="panel">
+                    <div class="panel-title">WAF2 检测记录</div>
+                    <div class="detection-list" id="waf2-detections">
+                        <div class="empty-state">暂无检测记录</div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- 检测记录面板 -->
+        <div id="detections-panel" class="tab-content" style="display: none;">
+            <div class="section">
+                <div class="section-title">全部检测记录</div>
+                <div class="detection-list" id="all-detections">
+                    <div class="empty-state">暂无检测记录</div>
+                </div>
+            </div>
+        </div>
+
+        <!-- 配置面板 -->
+        <div id="config-panel" class="tab-content" style="display: none;">
+            <div class="accordion">
+                <!-- WAF1 静态规则配置 -->
+                <div class="accordion-item expanded" data-accordion="waf1-rules">
+                    <div class="accordion-header" onclick="toggleAccordion('waf1-rules')">
+                        <div class="accordion-header-left">
+                            <div class="accordion-icon waf1">🛡️</div>
+                            <div>
+                                <div class="accordion-title">WAF1 静态规则</div>
+                                <div class="accordion-subtitle">MCP 协议层正则检测规则</div>
+                            </div>
+                        </div>
+                        <div class="accordion-header-right">
+                            <span class="accordion-status active" id="waf1-rules-status">5 规则启用</span>
+                            <span class="accordion-chevron">▼</span>
+                        </div>
+                    </div>
+                    <div class="accordion-content">
+                        <div class="accordion-body">
+                            <!-- 迷你统计 -->
+                            <div class="mini-stats">
+                                <div class="mini-stat-card">
+                                    <div class="mini-stat-value blue" id="cfg-waf1-total">0</div>
+                                    <div class="mini-stat-label">总请求</div>
+                                </div>
+                                <div class="mini-stat-card">
+                                    <div class="mini-stat-value red" id="cfg-waf1-blocked">0</div>
+                                    <div class="mini-stat-label">已拦截</div>
+                                </div>
+                                <div class="mini-stat-card">
+                                    <div class="mini-stat-value green" id="cfg-waf1-passed">0</div>
+                                    <div class="mini-stat-label">已放行</div>
+                                </div>
+                            </div>
+
+                            <div class="section-divider">注入攻击检测</div>
+                            <div class="switch-group">
+                                <div class="switch-item">
+                                    <div class="switch-item-left">
+                                        <div class="switch-item-icon high">💉</div>
+                                        <div class="switch-item-info">
+                                            <div class="switch-item-title">SQL 注入检测</div>
+                                            <div class="switch-item-desc">检测 UNION、SELECT、DROP 等 SQL 关键字</div>
+                                        </div>
+                                    </div>
+                                    <div class="switch-item-right">
+                                        <span class="severity-tag high">HIGH</span>
+                                        <div class="toggle-switch active" data-rule="sqlInjection" onclick="toggleRule(this)"></div>
+                                    </div>
+                                </div>
+
+                                <div class="switch-item">
+                                    <div class="switch-item-left">
+                                        <div class="switch-item-icon critical">⚡</div>
+                                        <div class="switch-item-info">
+                                            <div class="switch-item-title">命令注入检测</div>
+                                            <div class="switch-item-desc">检测 Shell 命令执行如 ; rm -rf、| cat 等</div>
+                                        </div>
+                                    </div>
+                                    <div class="switch-item-right">
+                                        <span class="severity-tag critical">CRITICAL</span>
+                                        <div class="toggle-switch active" data-rule="commandInjection" onclick="toggleRule(this)"></div>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <div class="section-divider">脚本与遍历攻击</div>
+                            <div class="switch-group">
+                                <div class="switch-item">
+                                    <div class="switch-item-left">
+                                        <div class="switch-item-icon high">📜</div>
+                                        <div class="switch-item-info">
+                                            <div class="switch-item-title">XSS 跨站脚本</div>
+                                            <div class="switch-item-desc">检测 &lt;script&gt;、javascript: 等 XSS payload</div>
+                                        </div>
+                                    </div>
+                                    <div class="switch-item-right">
+                                        <span class="severity-tag high">HIGH</span>
+                                        <div class="toggle-switch active" data-rule="xss" onclick="toggleRule(this)"></div>
+                                    </div>
+                                </div>
+
+                                <div class="switch-item">
+                                    <div class="switch-item-left">
+                                        <div class="switch-item-icon high">📁</div>
+                                        <div class="switch-item-info">
+                                            <div class="switch-item-title">路径遍历检测</div>
+                                            <div class="switch-item-desc">检测 ../ 等目录遍历 payload</div>
+                                        </div>
+                                    </div>
+                                    <div class="switch-item-right">
+                                        <span class="severity-tag high">HIGH</span>
+                                        <div class="toggle-switch active" data-rule="pathTraversal" onclick="toggleRule(this)"></div>
+                                    </div>
+                                </div>
+
+                                <div class="switch-item">
+                                    <div class="switch-item-left">
+                                        <div class="switch-item-icon critical">🔐</div>
+                                        <div class="switch-item-info">
+                                            <div class="switch-item-title">敏感文件访问</div>
+                                            <div class="switch-item-desc">检测 /etc/passwd、.env 等敏感文件访问</div>
+                                        </div>
+                                    </div>
+                                    <div class="switch-item-right">
+                                        <span class="severity-tag critical">CRITICAL</span>
+                                        <div class="toggle-switch active" data-rule="sensitiveFiles" onclick="toggleRule(this)"></div>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <div class="section-divider">数据检测器</div>
+                            <div class="switch-group">
+                                <div class="switch-item">
+                                    <div class="switch-item-left">
+                                        <div class="switch-item-icon critical">🔑</div>
+                                        <div class="switch-item-info">
+                                            <div class="switch-item-title">密钥泄露检测</div>
+                                            <div class="switch-item-desc">检测 API Key、Token、私钥等</div>
+                                        </div>
+                                    </div>
+                                    <div class="switch-item-right">
+                                        <span class="severity-tag critical">CRITICAL</span>
+                                        <div class="toggle-switch active" data-detector="secrets" onclick="toggleRule(this)"></div>
+                                    </div>
+                                </div>
+
+                                <div class="switch-item">
+                                    <div class="switch-item-left">
+                                        <div class="switch-item-icon high">👤</div>
+                                        <div class="switch-item-info">
+                                            <div class="switch-item-title">PII 个人信息</div>
+                                            <div class="switch-item-desc">检测身份证、手机号、银行卡等</div>
+                                        </div>
+                                    </div>
+                                    <div class="switch-item-right">
+                                        <span class="severity-tag high">HIGH</span>
+                                        <div class="toggle-switch active" data-detector="pii" onclick="toggleRule(this)"></div>
+                                    </div>
+                                </div>
+
+                                <div class="switch-item">
+                                    <div class="switch-item-left">
+                                        <div class="switch-item-icon medium">🔤</div>
+                                        <div class="switch-item-info">
+                                            <div class="switch-item-title">Unicode 异常</div>
+                                            <div class="switch-item-desc">检测零宽字符、控制字符等异常 Unicode</div>
+                                        </div>
+                                    </div>
+                                    <div class="switch-item-right">
+                                        <span class="severity-tag medium">MEDIUM</span>
+                                        <div class="toggle-switch active" data-detector="unicode" onclick="toggleRule(this)"></div>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <div class="action-group">
+                                <button class="btn btn-primary" onclick="testWaf1Connection()">
+                                    <span>🔌</span> 测试连接
+                                </button>
+                                <button class="btn btn-secondary" onclick="resetWaf1Stats()">
+                                    <span>🔄</span> 重置统计
+                                </button>
+                            </div>
+                            <div id="waf1-config-status"></div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- WAF2 LLM 配置 -->
+                <div class="accordion-item" data-accordion="waf2-llm">
+                    <div class="accordion-header" onclick="toggleAccordion('waf2-llm')">
+                        <div class="accordion-header-left">
+                            <div class="accordion-icon waf2">🤖</div>
+                            <div>
+                                <div class="accordion-title">WAF2 LLM 动态检测</div>
+                                <div class="accordion-subtitle">HTTP 流量层 AI 语义分析</div>
+                            </div>
+                        </div>
+                        <div class="accordion-header-right">
+                            <span class="accordion-status active" id="waf2-status-badge">运行中</span>
+                            <span class="accordion-chevron">▼</span>
+                        </div>
+                    </div>
+                    <div class="accordion-content">
+                        <div class="accordion-body">
+                            <!-- 迷你统计 -->
+                            <div class="mini-stats">
+                                <div class="mini-stat-card">
+                                    <div class="mini-stat-value blue" id="cfg-waf2-total">0</div>
+                                    <div class="mini-stat-label">总请求</div>
+                                </div>
+                                <div class="mini-stat-card">
+                                    <div class="mini-stat-value red" id="cfg-waf2-blocked">0</div>
+                                    <div class="mini-stat-label">已拦截</div>
+                                </div>
+                                <div class="mini-stat-card">
+                                    <div class="mini-stat-value purple" id="cfg-waf2-llm">0</div>
+                                    <div class="mini-stat-label">LLM调用</div>
+                                </div>
+                                <div class="mini-stat-card">
+                                    <div class="mini-stat-value green" id="cfg-waf2-cache">0%</div>
+                                    <div class="mini-stat-label">缓存命中</div>
+                                </div>
+                            </div>
+
+                            <div class="section-divider">LLM 模型配置</div>
+                            <div class="model-selector" id="model-selector">
+                                <div class="model-option selected" data-model="qwen-turbo" onclick="selectModel(this)">
+                                    <div class="model-name">Qwen Turbo</div>
+                                    <div class="model-desc">快速响应，低延迟</div>
+                                </div>
+                                <div class="model-option" data-model="qwen-plus" onclick="selectModel(this)">
+                                    <div class="model-name">Qwen Plus</div>
+                                    <div class="model-desc">均衡性能</div>
+                                </div>
+                                <div class="model-option" data-model="qwen-max" onclick="selectModel(this)">
+                                    <div class="model-name">Qwen Max</div>
+                                    <div class="model-desc">高精度分析</div>
+                                </div>
+                                <div class="model-option" data-model="custom" onclick="selectModel(this)">
+                                    <div class="model-name">自定义</div>
+                                    <div class="model-desc">其他兼容 API</div>
+                                </div>
+                            </div>
+
+                            <div class="section-divider">API 设置</div>
+                            <div class="config-group">
+                                <div class="config-row-inline">
+                                    <div class="config-field">
+                                        <label>API Key <span class="hint">(Qwen DashScope)</span></label>
+                                        <input type="password" id="cfg-llm-apikey" placeholder="sk-xxxx..." value="">
+                                    </div>
+                                    <div class="config-field">
+                                        <label>超时时间 <span class="hint">(毫秒)</span></label>
+                                        <input type="number" id="cfg-llm-timeout" value="30000" min="5000" max="120000">
+                                    </div>
+                                </div>
+                            </div>
+
+                            <div class="section-divider">检测配置</div>
+                            <div class="switch-group">
+                                <div class="switch-item">
+                                    <div class="switch-item-left">
+                                        <div class="switch-item-icon high">📥</div>
+                                        <div class="switch-item-info">
+                                            <div class="switch-item-title">请求检测</div>
+                                            <div class="switch-item-desc">分析入站请求的攻击意图</div>
+                                        </div>
+                                    </div>
+                                    <div class="switch-item-right">
+                                        <div class="toggle-switch active" data-waf2="requestAnalysis" onclick="toggleRule(this)"></div>
+                                    </div>
+                                </div>
+
+                                <div class="switch-item">
+                                    <div class="switch-item-left">
+                                        <div class="switch-item-icon high">📤</div>
+                                        <div class="switch-item-info">
+                                            <div class="switch-item-title">响应检测</div>
+                                            <div class="switch-item-desc">检测响应中的敏感数据泄露</div>
+                                        </div>
+                                    </div>
+                                    <div class="switch-item-right">
+                                        <div class="toggle-switch active" data-waf2="responseAnalysis" onclick="toggleRule(this)"></div>
+                                    </div>
+                                </div>
+
+                                <div class="switch-item">
+                                    <div class="switch-item-left">
+                                        <div class="switch-item-icon medium">💾</div>
+                                        <div class="switch-item-info">
+                                            <div class="switch-item-title">结果缓存</div>
+                                            <div class="switch-item-desc">缓存 LLM 分析结果减少调用</div>
+                                        </div>
+                                    </div>
+                                    <div class="switch-item-right">
+                                        <div class="toggle-switch active" data-waf2="cache" onclick="toggleRule(this)"></div>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <div class="action-group">
+                                <button class="btn btn-primary" onclick="testWaf2Connection()">
+                                    <span>🔌</span> 测试连接
+                                </button>
+                                <button class="btn btn-secondary" onclick="resetWaf2Stats()">
+                                    <span>🔄</span> 重置统计
+                                </button>
+                                <button class="btn btn-secondary" onclick="clearWaf2Cache()">
+                                    <span>🗑️</span> 清空缓存
+                                </button>
+                            </div>
+                            <div id="waf2-config-status"></div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- API 端点配置 -->
+                <div class="accordion-item" data-accordion="api-config">
+                    <div class="accordion-header" onclick="toggleAccordion('api-config')">
+                        <div class="accordion-header-left">
+                            <div class="accordion-icon api">🔗</div>
+                            <div>
+                                <div class="accordion-title">API 端点配置</div>
+                                <div class="accordion-subtitle">WAF 服务地址与刷新设置</div>
+                            </div>
+                        </div>
+                        <div class="accordion-header-right">
+                            <span class="accordion-status active">已配置</span>
+                            <span class="accordion-chevron">▼</span>
+                        </div>
+                    </div>
+                    <div class="accordion-content">
+                        <div class="accordion-body">
+                            <div class="config-group">
+                                <div class="config-row-inline">
+                                    <div class="config-field">
+                                        <label>WAF1 地址 <span class="hint">(MCP Hub)</span></label>
+                                        <input type="text" id="waf1-url" value="http://localhost:4000" placeholder="http://localhost:4000">
+                                    </div>
+                                    <div class="config-field">
+                                        <label>WAF2 地址 <span class="hint">(HTTP 代理)</span></label>
+                                        <input type="text" id="waf2-url" value="http://localhost:8081" placeholder="http://localhost:8081">
+                                    </div>
+                                </div>
+
+                                <div class="config-row-inline">
+                                    <div class="config-field">
+                                        <label>刷新间隔 <span class="hint">(毫秒)</span></label>
+                                        <input type="number" id="refresh-interval" value="5000" min="1000" max="60000" step="1000">
+                                    </div>
+                                    <div class="config-field">
+                                        <label>上游地址 <span class="hint">(目标应用)</span></label>
+                                        <input type="text" id="upstream-url" value="http://localhost:3000" placeholder="http://localhost:3000">
+                                    </div>
+                                </div>
+                            </div>
+
+                            <div class="action-group">
+                                <button class="btn btn-primary" onclick="saveApiConfig()">
+                                    <span>💾</span> 保存配置
+                                </button>
+                                <button class="btn btn-secondary" onclick="testAllConnections()">
+                                    <span>🔍</span> 测试所有连接
+                                </button>
+                            </div>
+                            <div id="api-config-status"></div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- 数据管理 -->
+                <div class="accordion-item" data-accordion="data-mgmt">
+                    <div class="accordion-header" onclick="toggleAccordion('data-mgmt')">
+                        <div class="accordion-header-left">
+                            <div class="accordion-icon data">📊</div>
+                            <div>
+                                <div class="accordion-title">数据管理</div>
+                                <div class="accordion-subtitle">统计重置与日志导出</div>
+                            </div>
+                        </div>
+                        <div class="accordion-header-right">
+                            <span class="accordion-chevron">▼</span>
+                        </div>
+                    </div>
+                    <div class="accordion-content">
+                        <div class="accordion-body">
+                            <div class="switch-group">
+                                <div class="switch-item">
+                                    <div class="switch-item-left">
+                                        <div class="switch-item-icon medium">📈</div>
+                                        <div class="switch-item-info">
+                                            <div class="switch-item-title">实时刷新</div>
+                                            <div class="switch-item-desc">自动刷新仪表盘数据</div>
+                                        </div>
+                                    </div>
+                                    <div class="switch-item-right">
+                                        <div class="toggle-switch active" id="auto-refresh-toggle" onclick="toggleAutoRefresh(this)"></div>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <div class="action-group" style="border-top: none; padding-top: 0;">
+                                <button class="btn btn-primary" onclick="refreshData()">
+                                    <span>🔄</span> 立即刷新
+                                </button>
+                                <button class="btn btn-secondary" onclick="exportLogs()">
+                                    <span>📥</span> 导出日志
+                                </button>
+                                <button class="btn btn-danger" onclick="resetAllStats()">
+                                    <span>⚠️</span> 重置所有统计
+                                </button>
+                            </div>
+                            <div id="data-mgmt-status"></div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // 配置
+        let WAF1_URL = 'http://localhost:4000';
+        let WAF2_URL = 'http://localhost:8081';
+        let REFRESH_INTERVAL = 5000;
+        let refreshTimer = null;
+
+        // 数据存储
+        let waf1Data = null;
+        let waf2Data = null;
+        let allDetections = [];
+        let mcpServers = [];
+        let selectedServer = null;
+
+        // 初始化
+        document.addEventListener('DOMContentLoaded', () => {
+            initTabs();
+            loadConfig();
+            refreshData();
+            fetchMcpServers();
+            startAutoRefresh();
+        });
+
+        function initTabs() {
+            // 只选择主标签栏中的 .tab (排除 inspector-tab)
+            document.querySelectorAll('.tabs > .tab').forEach(tab => {
+                tab.addEventListener('click', () => {
+                    document.querySelectorAll('.tabs > .tab').forEach(t => t.classList.remove('active'));
+                    tab.classList.add('active');
+
+                    document.querySelectorAll('.tab-content').forEach(p => p.style.display = 'none');
+                    const panelId = `${tab.dataset.tab}-panel`;
+                    const panel = document.getElementById(panelId);
+                    if (panel) {
+                        panel.style.display = 'block';
+                    } else {
+                        console.error('找不到面板:', panelId);
+                    }
+                });
+            });
+        }
+
+        function loadConfig() {
+            const savedWaf1 = localStorage.getItem('waf1_url');
+            const savedWaf2 = localStorage.getItem('waf2_url');
+            const savedInterval = localStorage.getItem('refresh_interval');
+
+            if (savedWaf1) {
+                WAF1_URL = savedWaf1;
+                document.getElementById('waf1-url').value = savedWaf1;
+            }
+            if (savedWaf2) {
+                WAF2_URL = savedWaf2;
+                document.getElementById('waf2-url').value = savedWaf2;
+            }
+            if (savedInterval) {
+                REFRESH_INTERVAL = parseInt(savedInterval);
+                document.getElementById('refresh-interval').value = savedInterval;
+            }
+
+            // 监听配置变化
+            document.getElementById('waf1-url').addEventListener('change', saveConfig);
+            document.getElementById('waf2-url').addEventListener('change', saveConfig);
+            document.getElementById('refresh-interval').addEventListener('change', saveConfig);
+        }
+
+        function saveConfig() {
+            WAF1_URL = document.getElementById('waf1-url').value;
+            WAF2_URL = document.getElementById('waf2-url').value;
+            REFRESH_INTERVAL = parseInt(document.getElementById('refresh-interval').value);
+
+            localStorage.setItem('waf1_url', WAF1_URL);
+            localStorage.setItem('waf2_url', WAF2_URL);
+            localStorage.setItem('refresh_interval', REFRESH_INTERVAL.toString());
+
+            startAutoRefresh();
+        }
+
+        function startAutoRefresh() {
+            if (refreshTimer) clearInterval(refreshTimer);
+            refreshTimer = setInterval(refreshData, REFRESH_INTERVAL);
+        }
+
+        async function refreshData() {
+            await Promise.all([fetchWaf1Data(), fetchWaf2Data()]);
+            updateUI();
+        }
+
+        async function fetchWaf1Data() {
+            try {
+                const response = await fetch(`${WAF1_URL}/api/waf1/dashboard`);
+                if (response.ok) {
+                    waf1Data = await response.json();
+                    document.getElementById('waf1-status').classList.add('online');
+                    document.getElementById('waf1-status').classList.remove('offline');
+                } else {
+                    throw new Error('WAF1 不可用');
+                }
+            } catch (e) {
+                console.error('WAF1 获取失败:', e);
+                document.getElementById('waf1-status').classList.remove('online');
+                document.getElementById('waf1-status').classList.add('offline');
+                waf1Data = null;
+            }
+        }
+
+        async function fetchWaf2Data() {
+            try {
+                const response = await fetch(`${WAF2_URL}/waf2/dashboard`);
+                if (response.ok) {
+                    waf2Data = await response.json();
+                    document.getElementById('waf2-status').classList.add('online');
+                    document.getElementById('waf2-status').classList.remove('offline');
+                } else {
+                    throw new Error('WAF2 不可用');
+                }
+            } catch (e) {
+                console.error('WAF2 获取失败:', e);
+                document.getElementById('waf2-status').classList.remove('online');
+                document.getElementById('waf2-status').classList.add('offline');
+                waf2Data = null;
+            }
+        }
+
+        function updateUI() {
+            updateOverview();
+            updateWaf1Panel();
+            updateWaf2Panel();
+            updateDetectionsPanel();
+            updateConfigPanelStats();
+        }
+
+        function updateOverview() {
+            const waf1Total = waf1Data?.summary?.total || 0;
+            const waf2Total = waf2Data?.summary?.total || 0;
+            const waf1Blocked = waf1Data?.summary?.blocked || 0;
+            const waf2Blocked = waf2Data?.summary?.blocked || 0;
+            const waf1Passed = waf1Data?.summary?.passed || 0;
+            const waf2Passed = waf2Data?.summary?.passed || 0;
+
+            const totalRequests = waf1Total + waf2Total;
+            const totalBlocked = waf1Blocked + waf2Blocked;
+            const totalPassed = waf1Passed + waf2Passed;
+            const blockRate = totalRequests > 0 ? ((totalBlocked / totalRequests) * 100).toFixed(2) : '0.00';
+
+            document.getElementById('total-requests').textContent = totalRequests;
+            document.getElementById('total-blocked').textContent = totalBlocked;
+            document.getElementById('total-passed').textContent = totalPassed;
+            document.getElementById('block-rate').textContent = blockRate + '%';
+
+            document.getElementById('waf1-blocked').textContent = waf1Blocked;
+            document.getElementById('waf1-detail').textContent = `总计 ${waf1Total} 请求`;
+            document.getElementById('waf2-blocked').textContent = waf2Blocked;
+            document.getElementById('waf2-detail').textContent = `总计 ${waf2Total} 请求`;
+
+            document.getElementById('cache-hit-rate').textContent = waf2Data?.cache?.hit_rate || '-';
+            document.getElementById('cache-detail').textContent = `${waf2Data?.cache?.hits || 0} 命中 / ${waf2Data?.cache?.llm_calls || 0} LLM调用`;
+            document.getElementById('avg-latency').textContent = (waf2Data?.summary?.avg_latency_ms || '-') + 'ms';
+
+            // 合并攻击类型数据 (WAF1: last24h.byCategory 或 rules, WAF2: by_category)
+            const categories = {};
+            const waf1Categories = waf1Data?.last24h?.byCategory || waf1Data?.rules || waf1Data?.by_category || {};
+            Object.entries(waf1Categories).forEach(([k, v]) => {
+                categories[k] = (categories[k] || 0) + v;
+            });
+            if (waf2Data?.by_category) {
+                Object.entries(waf2Data.by_category).forEach(([k, v]) => {
+                    categories[k] = (categories[k] || 0) + v;
+                });
+            }
+            renderBarChart('category-chart', categories, 'default');
+
+            // 合并严重等级数据 (WAF1: last24h.bySeverity, WAF2: by_severity)
+            const severities = {};
+            const waf1Severities = waf1Data?.last24h?.bySeverity || waf1Data?.by_severity || {};
+            Object.entries(waf1Severities).forEach(([k, v]) => {
+                severities[k] = (severities[k] || 0) + v;
+            });
+            if (waf2Data?.by_severity) {
+                Object.entries(waf2Data.by_severity).forEach(([k, v]) => {
+                    severities[k] = (severities[k] || 0) + v;
+                });
+            }
+            renderBarChart('severity-chart', severities, 'severity');
+        }
+
+        function updateWaf1Panel() {
+            if (!waf1Data) {
+                document.getElementById('waf1-total').textContent = '-';
+                document.getElementById('waf1-blocked-detail').textContent = '-';
+                document.getElementById('waf1-passed').textContent = '-';
+                document.getElementById('waf1-ratelimit').textContent = '-';
+                return;
+            }
+
+            document.getElementById('waf1-total').textContent = waf1Data.summary?.total || 0;
+            document.getElementById('waf1-blocked-detail').textContent = waf1Data.summary?.blocked || 0;
+            document.getElementById('waf1-passed').textContent = waf1Data.summary?.passed || 0;
+            document.getElementById('waf1-ratelimit').textContent = waf1Data.summary?.rate_limited || 0;
+
+            renderBarChart('waf1-category-chart', waf1Data.last24h?.byCategory || waf1Data.rules || waf1Data.by_category || {}, 'default');
+            renderDetectionList('waf1-detections', waf1Data.recentDetections || waf1Data.recent_detections || [], 'waf1');
+        }
+
+        function updateWaf2Panel() {
+            if (!waf2Data) {
+                document.getElementById('waf2-total').textContent = '-';
+                document.getElementById('waf2-blocked-req').textContent = '-';
+                document.getElementById('waf2-blocked-resp').textContent = '-';
+                document.getElementById('waf2-llm-calls').textContent = '-';
+                return;
+            }
+
+            document.getElementById('waf2-total').textContent = waf2Data.summary?.total || 0;
+            document.getElementById('waf2-blocked-req').textContent = waf2Data.by_direction?.request || 0;
+            document.getElementById('waf2-blocked-resp').textContent = waf2Data.by_direction?.response || 0;
+            document.getElementById('waf2-llm-calls').textContent = waf2Data.cache?.llm_calls || 0;
+
+            renderBarChart('waf2-category-chart', waf2Data.by_category || {}, 'default');
+            renderDetectionList('waf2-detections', waf2Data.recent_detections || [], 'waf2');
+        }
+
+        function updateDetectionsPanel() {
+            const all = [];
+
+            // WAF1 使用 recentDetections (驼峰), WAF2 使用 recent_detections (下划线)
+            const waf1Detections = waf1Data?.recentDetections || waf1Data?.recent_detections || [];
+            const waf2Detections = waf2Data?.recent_detections || [];
+
+            waf1Detections.forEach(d => {
+                all.push({ ...d, source: 'waf1' });
+            });
+            waf2Detections.forEach(d => {
+                all.push({ ...d, source: 'waf2' });
+            });
+
+            // 按时间排序 (WAF1 用 ts 毫秒时间戳, WAF2 用 timestamp ISO字符串)
+            all.sort((a, b) => {
+                const timeA = a.ts || new Date(a.timestamp || a.labels?.timestamp).getTime();
+                const timeB = b.ts || new Date(b.timestamp || b.labels?.timestamp).getTime();
+                return timeB - timeA;
+            });
+            allDetections = all;
+
+            renderDetectionList('all-detections', all.slice(0, 50), 'all');
+        }
+
+        function renderBarChart(containerId, data, type) {
+            const container = document.getElementById(containerId);
+
+            if (!data || Object.keys(data).length === 0) {
+                container.innerHTML = '<div class="empty-state">暂无数据</div>';
+                return;
+            }
+
+            const entries = Object.entries(data).sort((a, b) => b[1] - a[1]);
+            const maxValue = Math.max(...entries.map(e => e[1]));
+
+            const html = entries.map(([label, value]) => {
+                const percentage = maxValue > 0 ? (value / maxValue) * 100 : 0;
+                let colorClass = 'default';
+
+                if (type === 'severity') {
+                    colorClass = label.toLowerCase();
+                }
+
+                return `
+                    <div class="bar-item">
+                        <div class="bar-label">${formatLabel(label)}</div>
+                        <div class="bar-container">
+                            <div class="bar-fill ${colorClass}" style="width: ${percentage}%">${value}</div>
+                        </div>
+                    </div>
+                `;
+            }).join('');
+
+            container.innerHTML = html;
+        }
+
+        function renderDetectionList(containerId, detections, source) {
+            const container = document.getElementById(containerId);
+
+            if (!detections || detections.length === 0) {
+                container.innerHTML = '<div class="empty-state">暂无检测记录</div>';
+                return;
+            }
+
+            const html = detections.map(d => {
+                // 兼容 WAF1 和 WAF2 的不同数据格式
+                const labels = d.labels || {};
+                const severity = d.severity || labels.severity || 'medium';
+                const category = d.category || d.detected_by || 'unknown';
+                const reason = d.reason || d.message || '检测到威胁';
+                // WAF1 用 ts (毫秒时间戳) 或 labels.timestamp, WAF2 用 timestamp
+                const timestamp = d.timestamp || labels.timestamp || (d.ts ? new Date(d.ts).toISOString() : null);
+                const owasp = d.owasp || labels.owasp || '-';
+                const mitre = d.mitre || labels.mitreTactic || '-';
+                const direction = d.direction || labels.direction || '-';
+                const itemSource = d.source || labels.source || source;
+                const tool = d.tool || '-';
+
+                return `
+                    <div class="detection-item ${severity}">
+                        <div class="detection-header">
+                            <span class="detection-category">
+                                ${formatLabel(category)}
+                                <span class="waf-badge ${itemSource}">${itemSource.toUpperCase()}</span>
+                                <span class="severity-badge ${severity}">${severity.toUpperCase()}</span>
+                            </span>
+                            <span class="detection-time">${timestamp ? formatTime(timestamp) : '-'}</span>
+                        </div>
+                        <div class="detection-details">${reason}</div>
+                        <div class="detection-tags">
+                            ${tool !== '-' ? `<span class="tag direction">Tool: ${tool}</span>` : ''}
+                            ${owasp !== '-' ? `<span class="tag owasp">OWASP: ${owasp}</span>` : ''}
+                            ${mitre !== '-' ? `<span class="tag mitre">MITRE: ${mitre}</span>` : ''}
+                            ${direction !== '-' ? `<span class="tag direction">${direction}</span>` : ''}
+                        </div>
+                    </div>
+                `;
+            }).join('');
+
+            container.innerHTML = html;
+        }
+
+        function formatLabel(label) {
+            const labels = {
+                'sql_injection': 'SQL 注入',
+                'xss': 'XSS 跨站脚本',
+                'command_injection': '命令注入',
+                'path_traversal': '路径遍历',
+                'ssrf': 'SSRF',
+                'xxe': 'XXE',
+                'prompt_injection': '提示词注入',
+                'sensitive_data_exposure': '敏感数据泄露',
+                'authentication_bypass': '认证绕过',
+                'insecure_deserialization': '不安全反序列化',
+                'data_exfiltration': '数据窃取',
+                'secrets': '密钥泄露',
+                'pii': '个人信息',
+                'unicode': 'Unicode 异常',
+                'rate_limit': '限流',
+                'rbac': '访问控制',
+                'critical': '严重',
+                'high': '高',
+                'medium': '中',
+                'low': '低',
+                'info': '信息',
+                'request': '请求',
+                'response': '响应',
+            };
+            return labels[label?.toLowerCase()] || label;
+        }
+
+        function formatTime(timestamp) {
+            const date = new Date(timestamp);
+            return date.toLocaleString('zh-CN', {
+                month: '2-digit',
+                day: '2-digit',
+                hour: '2-digit',
+                minute: '2-digit',
+                second: '2-digit'
+            });
+        }
+
+        // ==================== 配置面板功能 (cc-switch 风格) ====================
+
+        // 手风琴切换
+        function toggleAccordion(id) {
+            const item = document.querySelector(`[data-accordion="${id}"]`);
+            if (item) {
+                item.classList.toggle('expanded');
+            }
+        }
+
+        // 规则开关切换
+        function toggleRule(el) {
+            el.classList.toggle('active');
+            updateRuleStatus();
+            showConfigStatus('waf1-config-status', 'info', '规则配置已更新 (前端演示)');
+        }
+
+        // 更新规则状态计数
+        function updateRuleStatus() {
+            const activeRules = document.querySelectorAll('[data-rule].toggle-switch.active, [data-detector].toggle-switch.active').length;
+            const statusEl = document.getElementById('waf1-rules-status');
+            if (statusEl) {
+                statusEl.textContent = `${activeRules} 规则启用`;
+                statusEl.className = `accordion-status ${activeRules > 0 ? 'active' : 'inactive'}`;
+            }
+        }
+
+        // LLM 模型选择
+        function selectModel(el) {
+            document.querySelectorAll('.model-option').forEach(opt => opt.classList.remove('selected'));
+            el.classList.add('selected');
+            showConfigStatus('waf2-config-status', 'info', `已选择模型: ${el.dataset.model}`);
+        }
+
+        // 自动刷新切换
+        function toggleAutoRefresh(el) {
+            el.classList.toggle('active');
+            if (el.classList.contains('active')) {
+                startAutoRefresh();
+                showConfigStatus('data-mgmt-status', 'success', '自动刷新已开启');
+            } else {
+                if (refreshTimer) clearInterval(refreshTimer);
+                showConfigStatus('data-mgmt-status', 'warning', '自动刷新已暂停');
+            }
+        }
+
+        // 测试 WAF1 连接
+        async function testWaf1Connection() {
+            const statusEl = document.getElementById('waf1-config-status');
+            showConfigStatus('waf1-config-status', 'info', '正在测试 WAF1 连接...');
+
+            try {
+                const response = await fetch(`${WAF1_URL}/api/waf1/stats`);
+                if (response.ok) {
+                    const data = await response.json();
+                    showConfigStatus('waf1-config-status', 'success',
+                        `WAF1 连接成功! 总请求: ${data.total || 0}, 拦截: ${data.blocked || 0}`);
+
+                    // 更新配置面板中的统计
+                    document.getElementById('cfg-waf1-total').textContent = data.total || 0;
+                    document.getElementById('cfg-waf1-blocked').textContent = data.blocked || 0;
+                    document.getElementById('cfg-waf1-passed').textContent = data.passed || 0;
+                } else {
+                    throw new Error(`HTTP ${response.status}`);
+                }
+            } catch (e) {
+                showConfigStatus('waf1-config-status', 'error', `WAF1 连接失败: ${e.message}`);
+            }
+        }
+
+        // 测试 WAF2 连接
+        async function testWaf2Connection() {
+            showConfigStatus('waf2-config-status', 'info', '正在测试 WAF2 连接...');
+
+            try {
+                const response = await fetch(`${WAF2_URL}/waf2/stats`);
+                if (response.ok) {
+                    const data = await response.json();
+                    showConfigStatus('waf2-config-status', 'success',
+                        `WAF2 连接成功! LLM调用: ${data.llm_calls || 0}, 缓存命中: ${data.cache_hit_rate || '0%'}`);
+
+                    // 更新配置面板中的统计
+                    document.getElementById('cfg-waf2-total').textContent = data.total || 0;
+                    document.getElementById('cfg-waf2-blocked').textContent = data.blocked || 0;
+                    document.getElementById('cfg-waf2-llm').textContent = data.llm_calls || 0;
+                    document.getElementById('cfg-waf2-cache').textContent = data.cache_hit_rate || '0%';
+                } else {
+                    throw new Error(`HTTP ${response.status}`);
+                }
+            } catch (e) {
+                showConfigStatus('waf2-config-status', 'error', `WAF2 连接失败: ${e.message}`);
+            }
+        }
+
+        // 测试所有连接
+        async function testAllConnections() {
+            showConfigStatus('api-config-status', 'info', '正在测试所有连接...');
+
+            const results = [];
+
+            try {
+                const waf1Resp = await fetch(`${WAF1_URL}/api/health`);
+                results.push(waf1Resp.ok ? '✅ WAF1' : '❌ WAF1');
+            } catch { results.push('❌ WAF1'); }
+
+            try {
+                const waf2Resp = await fetch(`${WAF2_URL}/waf2/health`);
+                results.push(waf2Resp.ok ? '✅ WAF2' : '❌ WAF2');
+            } catch { results.push('❌ WAF2'); }
+
+            showConfigStatus('api-config-status',
+                results.every(r => r.startsWith('✅')) ? 'success' : 'warning',
+                `连接测试: ${results.join(', ')}`);
+        }
+
+        // 重置 WAF1 统计
+        async function resetWaf1Stats() {
+            if (!confirm('确定要重置 WAF1 统计数据吗？')) return;
+
+            try {
+                await fetch(`${WAF1_URL}/api/waf1/reset`, { method: 'POST' });
+                showConfigStatus('waf1-config-status', 'success', 'WAF1 统计已重置');
+                refreshData();
+            } catch (e) {
+                showConfigStatus('waf1-config-status', 'error', `重置失败: ${e.message}`);
+            }
+        }
+
+        // 重置 WAF2 统计
+        async function resetWaf2Stats() {
+            if (!confirm('确定要重置 WAF2 统计数据吗？')) return;
+
+            try {
+                await fetch(`${WAF2_URL}/waf2/reset`, { method: 'POST' });
+                showConfigStatus('waf2-config-status', 'success', 'WAF2 统计已重置');
+                refreshData();
+            } catch (e) {
+                showConfigStatus('waf2-config-status', 'error', `重置失败: ${e.message}`);
+            }
+        }
+
+        // 清空 WAF2 缓存 (API 暂未实现)
+        function clearWaf2Cache() {
+            showConfigStatus('waf2-config-status', 'warning', '缓存清理功能需要后端 API 支持');
+        }
+
+        // 保存 API 配置
+        function saveApiConfig() {
+            saveConfig();
+            showConfigStatus('api-config-status', 'success', '配置已保存到本地存储');
+        }
+
+        // 导出日志
+        function exportLogs() {
+            const logs = {
+                waf1: waf1Data,
+                waf2: waf2Data,
+                detections: allDetections,
+                exportTime: new Date().toISOString()
+            };
+
+            const blob = new Blob([JSON.stringify(logs, null, 2)], { type: 'application/json' });
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = `waf-logs-${new Date().toISOString().slice(0,10)}.json`;
+            a.click();
+            URL.revokeObjectURL(url);
+
+            showConfigStatus('data-mgmt-status', 'success', '日志已导出');
+        }
+
+        // 显示配置状态消息
+        function showConfigStatus(containerId, type, message) {
+            const container = document.getElementById(containerId);
+            if (!container) return;
+
+            container.innerHTML = `
+                <div class="status-message ${type}">
+                    <span>${type === 'success' ? '✓' : type === 'error' ? '✗' : type === 'warning' ? '⚠' : 'ℹ'}</span>
+                    <span>${message}</span>
+                </div>
+            `;
+
+            // 自动清除
+            setTimeout(() => {
+                container.innerHTML = '';
+            }, 5000);
+        }
+
+        // 更新配置面板中的统计数据
+        function updateConfigPanelStats() {
+            if (waf1Data) {
+                document.getElementById('cfg-waf1-total').textContent = waf1Data.summary?.total || 0;
+                document.getElementById('cfg-waf1-blocked').textContent = waf1Data.summary?.blocked || 0;
+                document.getElementById('cfg-waf1-passed').textContent = waf1Data.summary?.passed || 0;
+            }
+
+            if (waf2Data) {
+                document.getElementById('cfg-waf2-total').textContent = waf2Data.summary?.total || 0;
+                document.getElementById('cfg-waf2-blocked').textContent = waf2Data.summary?.blocked || 0;
+                document.getElementById('cfg-waf2-llm').textContent = waf2Data.cache?.llm_calls || 0;
+                document.getElementById('cfg-waf2-cache').textContent = waf2Data.cache?.hit_rate || '0%';
+
+                // 更新 WAF2 状态徽章
+                const waf2Badge = document.getElementById('waf2-status-badge');
+                if (waf2Badge) {
+                    waf2Badge.textContent = '运行中';
+                    waf2Badge.className = 'accordion-status active';
+                }
+            }
+        }
+
+        // ==================== MCP Server 管理 (Inspector 风格) ====================
+
+        let currentTestTool = null;
+
+        async function fetchMcpServers() {
+            try {
+                const response = await fetch(`${WAF1_URL}/api/servers`);
+                if (response.ok) {
+                    const data = await response.json();
+                    mcpServers = data.servers || [];
+                    renderServersList();
+                    if (selectedServer) {
+                        selectedServer = mcpServers.find(s => s.name === selectedServer.name);
+                        renderServerDetail();
+                    }
+                }
+            } catch (e) {
+                console.error('获取 MCP Servers 失败:', e);
+                document.getElementById('servers-list').innerHTML =
+                    '<div class="empty-state">无法连接到 MCP Hub</div>';
+            }
+        }
+
+        function renderServersList() {
+            const container = document.getElementById('servers-list');
+
+            if (!mcpServers || mcpServers.length === 0) {
+                container.innerHTML = '<div class="empty-state">暂无 MCP Server</div>';
+                return;
+            }
+
+            const html = mcpServers.map(server => {
+                const tools = server.capabilities?.tools || [];
+                const resources = server.capabilities?.resources || [];
+                const isSelected = selectedServer?.name === server.name;
+
+                return `
+                    <div class="server-list-item ${isSelected ? 'selected' : ''}"
+                         onclick="selectServer('${server.name}')">
+                        <div class="name">
+                            ${server.displayName || server.name}
+                            <span class="server-status ${server.status}">${server.status}</span>
+                        </div>
+                        <div class="meta">${tools.length} tools, ${resources.length} resources</div>
+                    </div>
+                `;
+            }).join('');
+
+            container.innerHTML = html;
+        }
+
+        function selectServer(serverName) {
+            selectedServer = mcpServers.find(s => s.name === serverName);
+            renderServersList();
+            renderServerDetail();
+            initInspectorTabs();
+        }
+
+        function renderServerDetail() {
+            const emptyEl = document.getElementById('server-detail-empty');
+            const detailEl = document.getElementById('server-detail');
+
+            if (!selectedServer) {
+                emptyEl.style.display = 'block';
+                detailEl.style.display = 'none';
+                return;
+            }
+
+            emptyEl.style.display = 'none';
+            detailEl.style.display = 'block';
+
+            document.getElementById('detail-server-name').textContent = selectedServer.displayName || selectedServer.name;
+            document.getElementById('detail-server-status').textContent = selectedServer.status;
+            document.getElementById('detail-server-status').className = `server-status ${selectedServer.status}`;
+            document.getElementById('detail-version').textContent = selectedServer.serverInfo?.version || '-';
+            document.getElementById('detail-uptime').textContent = selectedServer.uptime ? formatUptime(selectedServer.uptime) : '-';
+            document.getElementById('detail-transport').textContent = selectedServer.transportType || 'stdio';
+
+            renderToolsList();
+            renderResourcesList();
+            renderPromptsList();
+        }
+
+        function initInspectorTabs() {
+            document.querySelectorAll('.inspector-tab').forEach(tab => {
+                tab.onclick = () => {
+                    document.querySelectorAll('.inspector-tab').forEach(t => t.classList.remove('active'));
+                    tab.classList.add('active');
+
+                    document.querySelectorAll('.inspector-tab-content').forEach(c => c.style.display = 'none');
+                    document.getElementById(`stab-${tab.dataset.stab}`).style.display = 'block';
+                };
+            });
+        }
+
+        function renderToolsList() {
+            const container = document.getElementById('tools-list');
+            const tools = selectedServer?.capabilities?.tools || [];
+
+            if (tools.length === 0) {
+                container.innerHTML = '<div class="empty-state">暂无工具</div>';
+                return;
+            }
+
+            const html = tools.map((tool, idx) => {
+                const params = tool.inputSchema?.properties || {};
+                const required = tool.inputSchema?.required || [];
+
+                const paramBadges = Object.keys(params).map(name => {
+                    const isReq = required.includes(name);
+                    return `<span class="param-badge ${isReq ? 'required' : ''}">${name}${isReq ? '*' : ''}</span>`;
+                }).join('');
+
+                return `
+                    <div class="tool-card">
+                        <div class="tool-header">
+                            <span class="tool-name">${tool.name}</span>
+                            <button class="test-btn" onclick="openToolTest(${idx})">测试</button>
+                        </div>
+                        <div class="tool-desc">${(tool.description || '无描述').substring(0, 150)}${tool.description?.length > 150 ? '...' : ''}</div>
+                        <div class="tool-params-preview">${paramBadges || '<span style="color:#666">无参数</span>'}</div>
+                    </div>
+                `;
+            }).join('');
+
+            container.innerHTML = html;
+        }
+
+        function renderResourcesList() {
+            const container = document.getElementById('resources-list');
+            const resources = selectedServer?.capabilities?.resources || [];
+
+            if (resources.length === 0) {
+                container.innerHTML = '<div class="empty-state">暂无资源</div>';
+                return;
+            }
+
+            const html = resources.map(res => `
+                <div class="resource-item">
+                    <div class="resource-name">${res.name}</div>
+                    <div class="resource-uri">${res.uri}</div>
+                    ${res.mimeType ? `<div class="resource-mime">类型: ${res.mimeType}</div>` : ''}
+                    ${res.description ? `<div class="resource-mime">${res.description}</div>` : ''}
+                </div>
+            `).join('');
+
+            container.innerHTML = html;
+        }
+
+        function renderPromptsList() {
+            const container = document.getElementById('prompts-list');
+            const prompts = selectedServer?.capabilities?.prompts || [];
+
+            if (prompts.length === 0) {
+                container.innerHTML = '<div class="empty-state">暂无提示词模板</div>';
+                return;
+            }
+
+            const html = prompts.map(p => `
+                <div class="prompt-item">
+                    <div class="prompt-name">${p.name}</div>
+                    ${p.description ? `<div class="prompt-desc">${p.description}</div>` : ''}
+                </div>
+            `).join('');
+
+            container.innerHTML = html;
+        }
+
+        function openToolTest(toolIndex) {
+            const tools = selectedServer?.capabilities?.tools || [];
+            currentTestTool = tools[toolIndex];
+
+            if (!currentTestTool) return;
+
+            document.getElementById('test-tool-name').textContent = currentTestTool.name;
+            document.getElementById('tool-test-panel').style.display = 'block';
+            document.getElementById('test-output').textContent = '等待执行...';
+            document.getElementById('test-output').classList.remove('error');
+
+            // 生成参数表单
+            const formContainer = document.getElementById('test-form');
+            const params = currentTestTool.inputSchema?.properties || {};
+            const required = currentTestTool.inputSchema?.required || [];
+
+            if (Object.keys(params).length === 0) {
+                formContainer.innerHTML = '<div style="color:#888">此工具无需参数</div>';
+                return;
+            }
+
+            const formHtml = Object.entries(params).map(([name, prop]) => {
+                const isReq = required.includes(name);
+                const type = prop.type || 'string';
+                let inputHtml = '';
+
+                if (prop.enum) {
+                    inputHtml = `<select id="param-${name}">
+                        ${prop.enum.map(v => `<option value="${v}">${v}</option>`).join('')}
+                    </select>`;
+                } else if (type === 'object') {
+                    inputHtml = `<textarea id="param-${name}" rows="2" placeholder='{"key": "value"}'></textarea>`;
+                } else {
+                    inputHtml = `<input type="text" id="param-${name}" placeholder="${prop.description || name}">`;
+                }
+
+                return `
+                    <div class="form-group">
+                        <label>${name} ${isReq ? '<span class="required">*</span>' : ''}</label>
+                        ${inputHtml}
+                    </div>
+                `;
+            }).join('');
+
+            formContainer.innerHTML = formHtml;
+        }
+
+        function closeToolTest() {
+            document.getElementById('tool-test-panel').style.display = 'none';
+            currentTestTool = null;
+        }
+
+        async function executeToolTest() {
+            if (!currentTestTool || !selectedServer) return;
+
+            const outputEl = document.getElementById('test-output');
+            outputEl.textContent = '执行中...';
+            outputEl.classList.remove('error');
+
+            // 收集参数
+            const params = currentTestTool.inputSchema?.properties || {};
+            const args = {};
+
+            for (const name of Object.keys(params)) {
+                const el = document.getElementById(`param-${name}`);
+                if (el && el.value) {
+                    if (params[name].type === 'object') {
+                        try {
+                            args[name] = JSON.parse(el.value);
+                        } catch {
+                            args[name] = el.value;
+                        }
+                    } else {
+                        args[name] = el.value;
+                    }
+                }
+            }
+
+            try {
+                // 调用 MCP Hub 的 tool 执行接口
+                const response = await fetch(`${WAF1_URL}/messages`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        method: 'tools/call',
+                        params: {
+                            name: currentTestTool.name,
+                            arguments: args
+                        }
+                    })
+                });
+
+                const result = await response.json();
+                outputEl.textContent = JSON.stringify(result, null, 2);
+
+                if (result.error || result.isError) {
+                    outputEl.classList.add('error');
+                }
+            } catch (e) {
+                outputEl.textContent = `请求失败: ${e.message}`;
+                outputEl.classList.add('error');
+            }
+        }
+
+        function formatUptime(seconds) {
+            if (seconds < 60) return `${seconds}秒`;
+            if (seconds < 3600) return `${Math.floor(seconds / 60)}分钟`;
+            if (seconds < 86400) return `${Math.floor(seconds / 3600)}小时`;
+            return `${Math.floor(seconds / 86400)}天`;
+        }
+
+        // ==================== 统计重置 ====================
+
+        async function resetAllStats() {
+            if (!confirm('确定要重置所有统计数据吗？')) return;
+
+            try {
+                await Promise.all([
+                    fetch(`${WAF1_URL}/api/waf1/reset`, { method: 'POST' }),
+                    fetch(`${WAF2_URL}/waf2/reset`, { method: 'POST' })
+                ]);
+                await refreshData();
+                alert('统计数据已重置');
+            } catch (e) {
+                alert('重置失败: ' + e.message);
+            }
+        }
+    </script>
+</body>
+</html>

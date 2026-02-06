@@ -27,6 +27,10 @@ const app = express();
 app.use(cors());  // 启用 CORS 支持
 app.use(express.json());
 
+app.get('/', (req, res) => {
+  res.sendFile('/app/src/dashboard.html');
+});
+
 // ==================== WAF1 仪表盘 API ====================
 // 注意: 这些路由必须在 waf1Middleware 之前注册，避免被拦截
 // 借鉴 Cloudflare Security Analytics
