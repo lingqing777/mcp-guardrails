@@ -1,5 +1,7 @@
 import express from "express";
 import cors from "cors";
+import fs from "fs";
+import path from "path";
 import logger from "./utils/logger.js";
 import { MCPHub } from "./MCPHub.js";
 import { SSEManager, EventTypes, HubState, SubscriptionTypes } from "./utils/sse-manager.js";
@@ -18,9 +20,84 @@ import { getMarketplace } from "./marketplace.js";
 import { MCPServerEndpoint } from "./mcp/server.js";
 import { WorkspaceCacheManager } from "./utils/workspace-cache.js";
 // WAF1 - MCP Guardrails 中间件
-import { waf1Middleware, getWaf1Stats, getDashboardData, getTimeSeriesData, getCallHistory, resetStats } from "./waf1.js";
+import { waf1Middleware, getWaf1Stats, getDashboardData, getTimeSeriesData, getCallHistory, resetStats, setWaf1Enabled, isWaf1Enabled } from "./waf1.js";
 
 const SERVER_ID = "mcp-hub";
+
+// ==================== 配置管理 ====================
+const CONFIG_FILE = process.env.GUARDRAILS_CONFIG || '/app/guardrails-config.json';
+
+// 默认配置
+const defaultConfig = {
+  mode: 'full',  // 'full' | 'lite'
+  waf1: {
+    enabled: true,
+    rules: {
+      sqlInjection: true,
+      commandInjection: true,
+      xss: true,
+      pathTraversal: true,
+      sensitiveFiles: true
+    }
+  },
+  waf2: {
+    enabled: true,
+    upstream: 'http://localhost:3000',
+    llm: {
+      provider: 'qwen',
+      model: 'qwen-turbo',
+      apiKey: '',
+      timeout: 30000
+    },
+    features: {
+      requestAnalysis: true,
+      responseAnalysis: true,
+      cache: true
+    }
+  },
+  mcpHub: {
+    port: 4000,
+    url: 'http://localhost:4000'
+  }
+};
+
+// 加载配置
+function loadGuardrailsConfig() {
+  try {
+    if (fs.existsSync(CONFIG_FILE)) {
+      const data = fs.readFileSync(CONFIG_FILE, 'utf-8');
+      const config = JSON.parse(data);
+      return { ...defaultConfig, ...config };
+    }
+  } catch (e) {
+    console.error('[Config] 加载配置失败:', e.message);
+  }
+  return defaultConfig;
+}
+
+// 保存配置
+function saveGuardrailsConfig(config) {
+  try {
+    fs.writeFileSync(CONFIG_FILE, JSON.stringify(config, null, 2));
+    return true;
+  } catch (e) {
+    console.error('[Config] 保存配置失败:', e.message);
+    return false;
+  }
+}
+
+// 当前配置
+let guardrailsConfig = loadGuardrailsConfig();
+
+// 应用配置到 WAF1
+function applyWaf1Config() {
+  const shouldEnable = guardrailsConfig.mode === 'full' && guardrailsConfig.waf1.enabled;
+  setWaf1Enabled(shouldEnable);
+  console.log(`[Config] WAF1 ${shouldEnable ? '已启用' : '已禁用'} (模式: ${guardrailsConfig.mode})`);
+}
+
+// 初始化时应用配置
+applyWaf1Config();
 
 // Create Express app
 const app = express();
@@ -30,6 +107,152 @@ app.use(express.json());
 app.get('/', (req, res) => {
   res.sendFile('/app/src/dashboard.html');
 });
+
+// ==================== 配置管理 API ====================
+
+// 获取当前配置
+app.get("/api/config", (req, res) => {
+  // 隐藏敏感信息
+  const safeConfig = {
+    ...guardrailsConfig,
+    waf2: {
+      ...guardrailsConfig.waf2,
+      llm: {
+        ...guardrailsConfig.waf2.llm,
+        apiKey: guardrailsConfig.waf2.llm.apiKey ? '***已配置***' : ''
+      }
+    }
+  };
+  res.json(safeConfig);
+});
+
+// 获取配置状态
+app.get("/api/config/status", (req, res) => {
+  res.json({
+    mode: guardrailsConfig.mode,
+    waf1Enabled: guardrailsConfig.mode === 'full' && guardrailsConfig.waf1.enabled,
+    waf2Enabled: guardrailsConfig.waf2.enabled,
+    waf1Running: isWaf1Enabled(),
+    hasApiKey: !!guardrailsConfig.waf2.llm.apiKey
+  });
+});
+
+// 切换防护模式
+app.post("/api/config/mode", (req, res) => {
+  const { mode } = req.body;
+  if (!['full', 'lite'].includes(mode)) {
+    return res.status(400).json({ error: '无效的模式，可选: full, lite' });
+  }
+
+  guardrailsConfig.mode = mode;
+  saveGuardrailsConfig(guardrailsConfig);
+  applyWaf1Config();
+
+  res.json({
+    success: true,
+    mode: guardrailsConfig.mode,
+    waf1Enabled: isWaf1Enabled(),
+    message: `已切换到${mode === 'full' ? '完整防护' : '轻量防护'}模式`
+  });
+});
+
+// 更新 WAF1 配置
+app.post("/api/config/waf1", (req, res) => {
+  const { enabled, rules } = req.body;
+
+  if (typeof enabled === 'boolean') {
+    guardrailsConfig.waf1.enabled = enabled;
+  }
+  if (rules && typeof rules === 'object') {
+    guardrailsConfig.waf1.rules = { ...guardrailsConfig.waf1.rules, ...rules };
+  }
+
+  saveGuardrailsConfig(guardrailsConfig);
+  applyWaf1Config();
+
+  res.json({
+    success: true,
+    waf1: guardrailsConfig.waf1,
+    waf1Running: isWaf1Enabled()
+  });
+});
+
+// 更新 WAF2 配置
+app.post("/api/config/waf2", (req, res) => {
+  const { enabled, upstream, llm, features } = req.body;
+
+  if (typeof enabled === 'boolean') {
+    guardrailsConfig.waf2.enabled = enabled;
+  }
+  if (upstream) {
+    guardrailsConfig.waf2.upstream = upstream;
+  }
+  if (llm && typeof llm === 'object') {
+    // 只更新提供的字段，保留未提供的
+    if (llm.provider) guardrailsConfig.waf2.llm.provider = llm.provider;
+    if (llm.model) guardrailsConfig.waf2.llm.model = llm.model;
+    if (llm.apiKey) guardrailsConfig.waf2.llm.apiKey = llm.apiKey;
+    if (llm.timeout) guardrailsConfig.waf2.llm.timeout = llm.timeout;
+  }
+  if (features && typeof features === 'object') {
+    guardrailsConfig.waf2.features = { ...guardrailsConfig.waf2.features, ...features };
+  }
+
+  saveGuardrailsConfig(guardrailsConfig);
+
+  res.json({
+    success: true,
+    waf2: {
+      ...guardrailsConfig.waf2,
+      llm: {
+        ...guardrailsConfig.waf2.llm,
+        apiKey: guardrailsConfig.waf2.llm.apiKey ? '***已配置***' : ''
+      }
+    }
+  });
+});
+
+// 完整配置更新
+app.post("/api/config", (req, res) => {
+  const { mode, waf1, waf2 } = req.body;
+
+  if (mode && ['full', 'lite'].includes(mode)) {
+    guardrailsConfig.mode = mode;
+  }
+  if (waf1 && typeof waf1 === 'object') {
+    guardrailsConfig.waf1 = { ...guardrailsConfig.waf1, ...waf1 };
+  }
+  if (waf2 && typeof waf2 === 'object') {
+    // 深度合并 waf2
+    if (waf2.enabled !== undefined) guardrailsConfig.waf2.enabled = waf2.enabled;
+    if (waf2.upstream) guardrailsConfig.waf2.upstream = waf2.upstream;
+    if (waf2.llm) {
+      guardrailsConfig.waf2.llm = { ...guardrailsConfig.waf2.llm, ...waf2.llm };
+    }
+    if (waf2.features) {
+      guardrailsConfig.waf2.features = { ...guardrailsConfig.waf2.features, ...waf2.features };
+    }
+  }
+
+  saveGuardrailsConfig(guardrailsConfig);
+  applyWaf1Config();
+
+  res.json({
+    success: true,
+    config: {
+      ...guardrailsConfig,
+      waf2: {
+        ...guardrailsConfig.waf2,
+        llm: {
+          ...guardrailsConfig.waf2.llm,
+          apiKey: guardrailsConfig.waf2.llm.apiKey ? '***已配置***' : ''
+        }
+      }
+    }
+  });
+});
+
+// ==================== END 配置管理 API ====================
 
 // ==================== WAF1 仪表盘 API ====================
 // 注意: 这些路由必须在 waf1Middleware 之前注册，避免被拦截
@@ -61,6 +284,24 @@ app.get("/api/waf1/history", (req, res) => {
 app.post("/api/waf1/reset", (req, res) => {
   resetStats();
   res.json({ success: true, message: "统计数据已重置" });
+});
+
+// WAF1 开关控制
+app.post("/api/waf1/toggle", (req, res) => {
+  const { enabled } = req.body;
+  if (typeof enabled !== 'boolean') {
+    return res.status(400).json({ error: 'enabled 必须是布尔值' });
+  }
+
+  guardrailsConfig.waf1.enabled = enabled;
+  saveGuardrailsConfig(guardrailsConfig);
+  applyWaf1Config();
+
+  res.json({
+    success: true,
+    waf1Enabled: isWaf1Enabled(),
+    message: `WAF1 ${enabled ? '已启用' : '已禁用'}`
+  });
 });
 
 // ==================== END WAF1 API ====================

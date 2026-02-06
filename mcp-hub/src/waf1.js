@@ -13,6 +13,18 @@
  *   5. 调用链追踪 (简化版 Invariant Dataflow)
  */
 
+// ==================== WAF1 动态开关 ====================
+let waf1Enabled = true;
+
+export function setWaf1Enabled(enabled) {
+  waf1Enabled = enabled;
+  console.log(`[WAF1] 状态切换: ${enabled ? '启用' : '禁用'}`);
+}
+
+export function isWaf1Enabled() {
+  return waf1Enabled;
+}
+
 // ==================== 缓存机制 (移植自 Invariant @cached) ====================
 
 class DetectorCache {
@@ -835,6 +847,11 @@ export function getCallHistory() {
  * Express 中间件
  */
 export function waf1Middleware(req, res, next) {
+  // 检查 WAF1 是否启用
+  if (!waf1Enabled) {
+    return next();
+  }
+
   if (req.path !== "/servers/tools" || req.method !== "POST") {
     return next();
   }

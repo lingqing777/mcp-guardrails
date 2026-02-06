@@ -868,6 +868,283 @@
 
         /* ==================== cc-switch 风格配置面板 ==================== */
 
+        /* 防护模式选择卡片 */
+        .mode-selector {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 16px;
+            margin-bottom: 24px;
+        }
+
+        .mode-card {
+            background: rgba(255, 255, 255, 0.03);
+            border: 2px solid rgba(255, 255, 255, 0.1);
+            border-radius: 16px;
+            padding: 24px;
+            cursor: pointer;
+            transition: all 0.3s;
+            position: relative;
+        }
+
+        .mode-card:hover {
+            border-color: rgba(102, 126, 234, 0.4);
+            background: rgba(255, 255, 255, 0.05);
+        }
+
+        .mode-card.selected {
+            border-color: #667eea;
+            background: rgba(102, 126, 234, 0.1);
+            box-shadow: 0 4px 20px rgba(102, 126, 234, 0.2);
+        }
+
+        .mode-card-radio {
+            position: absolute;
+            top: 20px;
+            right: 20px;
+            width: 22px;
+            height: 22px;
+            border: 2px solid rgba(255, 255, 255, 0.3);
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+
+        .mode-card.selected .mode-card-radio {
+            border-color: #667eea;
+            background: #667eea;
+        }
+
+        .mode-card.selected .mode-card-radio::after {
+            content: '✓';
+            color: white;
+            font-size: 12px;
+            font-weight: bold;
+        }
+
+        .mode-card-title {
+            font-size: 18px;
+            font-weight: 700;
+            margin-bottom: 8px;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+
+        .mode-card-subtitle {
+            font-size: 13px;
+            color: #888;
+            margin-bottom: 16px;
+        }
+
+        .mode-card-features {
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+            margin-bottom: 16px;
+            padding-bottom: 16px;
+            border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+        }
+
+        .mode-feature {
+            font-size: 13px;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .mode-feature.yes { color: #00ff88; }
+        .mode-feature.no { color: #666; }
+
+        .mode-card-hint {
+            font-size: 12px;
+            color: #666;
+            font-style: italic;
+        }
+
+        /* 配置区块 */
+        .config-section {
+            background: rgba(255, 255, 255, 0.03);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            border-radius: 12px;
+            margin-bottom: 16px;
+            overflow: hidden;
+        }
+
+        .config-section-header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 16px 20px;
+            background: rgba(0, 0, 0, 0.2);
+            border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+        }
+
+        .config-section-title {
+            font-size: 15px;
+            font-weight: 600;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+
+        .config-section-actions {
+            display: flex;
+            gap: 8px;
+        }
+
+        .config-section-body {
+            padding: 20px;
+        }
+
+        /* 输入框带复制按钮 */
+        .input-with-copy {
+            display: flex;
+            gap: 8px;
+            align-items: center;
+        }
+
+        .input-with-copy input {
+            flex: 1;
+        }
+
+        .copy-btn {
+            padding: 10px 16px;
+            background: rgba(102, 126, 234, 0.2);
+            border: 1px solid rgba(102, 126, 234, 0.3);
+            border-radius: 8px;
+            color: #667eea;
+            cursor: pointer;
+            font-size: 13px;
+            transition: all 0.2s;
+            white-space: nowrap;
+        }
+
+        .copy-btn:hover {
+            background: rgba(102, 126, 234, 0.3);
+        }
+
+        .copy-btn.copied {
+            background: rgba(0, 255, 136, 0.2);
+            border-color: rgba(0, 255, 136, 0.3);
+            color: #00ff88;
+        }
+
+        /* 代码块 */
+        .code-block {
+            background: rgba(0, 0, 0, 0.4);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            border-radius: 8px;
+            padding: 16px;
+            font-family: 'Consolas', 'Monaco', monospace;
+            font-size: 13px;
+            line-height: 1.5;
+            overflow-x: auto;
+            position: relative;
+        }
+
+        .code-block code {
+            color: #e4e4e4;
+        }
+
+        .code-block .comment { color: #666; }
+        .code-block .string { color: #98c379; }
+        .code-block .key { color: #e06c75; }
+
+        .code-block-copy {
+            position: absolute;
+            top: 8px;
+            right: 8px;
+            padding: 6px 12px;
+            background: rgba(255, 255, 255, 0.1);
+            border: none;
+            border-radius: 4px;
+            color: #aaa;
+            cursor: pointer;
+            font-size: 12px;
+            transition: all 0.2s;
+        }
+
+        .code-block-copy:hover {
+            background: rgba(255, 255, 255, 0.2);
+            color: white;
+        }
+
+        /* WAF 规则紧凑开关 */
+        .waf-rules-grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 20px;
+        }
+
+        .waf-rules-column {
+            background: rgba(0, 0, 0, 0.2);
+            border-radius: 8px;
+            padding: 16px;
+        }
+
+        .waf-rules-column-title {
+            font-size: 13px;
+            font-weight: 600;
+            margin-bottom: 12px;
+            color: #aaa;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .waf-rules-column.disabled {
+            opacity: 0.5;
+            pointer-events: none;
+        }
+
+        .waf-rule-row {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 8px 0;
+            border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+        }
+
+        .waf-rule-row:last-child {
+            border-bottom: none;
+        }
+
+        .waf-rule-name {
+            font-size: 13px;
+        }
+
+        .toggle-sm {
+            position: relative;
+            width: 36px;
+            height: 20px;
+            background: rgba(255, 255, 255, 0.1);
+            border-radius: 10px;
+            cursor: pointer;
+            transition: background 0.3s;
+        }
+
+        .toggle-sm.active {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+        }
+
+        .toggle-sm::after {
+            content: '';
+            position: absolute;
+            top: 2px;
+            left: 2px;
+            width: 16px;
+            height: 16px;
+            background: white;
+            border-radius: 50%;
+            transition: transform 0.3s;
+            box-shadow: 0 1px 3px rgba(0, 0, 0, 0.2);
+        }
+
+        .toggle-sm.active::after {
+            transform: translateX(16px);
+        }
+
         /* 手风琴容器 */
         .accordion {
             display: flex;
@@ -1610,404 +1887,251 @@
 
         <!-- 配置面板 -->
         <div id="config-panel" class="tab-content" style="display: none;">
-            <div class="accordion">
-                <!-- WAF1 静态规则配置 -->
-                <div class="accordion-item expanded" data-accordion="waf1-rules">
-                    <div class="accordion-header" onclick="toggleAccordion('waf1-rules')">
-                        <div class="accordion-header-left">
-                            <div class="accordion-icon waf1">🛡️</div>
-                            <div>
-                                <div class="accordion-title">WAF1 静态规则</div>
-                                <div class="accordion-subtitle">MCP 协议层正则检测规则</div>
-                            </div>
-                        </div>
-                        <div class="accordion-header-right">
-                            <span class="accordion-status active" id="waf1-rules-status">5 规则启用</span>
-                            <span class="accordion-chevron">▼</span>
-                        </div>
-                    </div>
-                    <div class="accordion-content">
-                        <div class="accordion-body">
-                            <!-- 迷你统计 -->
-                            <div class="mini-stats">
-                                <div class="mini-stat-card">
-                                    <div class="mini-stat-value blue" id="cfg-waf1-total">0</div>
-                                    <div class="mini-stat-label">总请求</div>
-                                </div>
-                                <div class="mini-stat-card">
-                                    <div class="mini-stat-value red" id="cfg-waf1-blocked">0</div>
-                                    <div class="mini-stat-label">已拦截</div>
-                                </div>
-                                <div class="mini-stat-card">
-                                    <div class="mini-stat-value green" id="cfg-waf1-passed">0</div>
-                                    <div class="mini-stat-label">已放行</div>
-                                </div>
-                            </div>
 
-                            <div class="section-divider">注入攻击检测</div>
-                            <div class="switch-group">
-                                <div class="switch-item">
-                                    <div class="switch-item-left">
-                                        <div class="switch-item-icon high">💉</div>
-                                        <div class="switch-item-info">
-                                            <div class="switch-item-title">SQL 注入检测</div>
-                                            <div class="switch-item-desc">检测 UNION、SELECT、DROP 等 SQL 关键字</div>
-                                        </div>
-                                    </div>
-                                    <div class="switch-item-right">
-                                        <span class="severity-tag high">HIGH</span>
-                                        <div class="toggle-switch active" data-rule="sqlInjection" onclick="toggleRule(this)"></div>
-                                    </div>
-                                </div>
-
-                                <div class="switch-item">
-                                    <div class="switch-item-left">
-                                        <div class="switch-item-icon critical">⚡</div>
-                                        <div class="switch-item-info">
-                                            <div class="switch-item-title">命令注入检测</div>
-                                            <div class="switch-item-desc">检测 Shell 命令执行如 ; rm -rf、| cat 等</div>
-                                        </div>
-                                    </div>
-                                    <div class="switch-item-right">
-                                        <span class="severity-tag critical">CRITICAL</span>
-                                        <div class="toggle-switch active" data-rule="commandInjection" onclick="toggleRule(this)"></div>
-                                    </div>
-                                </div>
-                            </div>
-
-                            <div class="section-divider">脚本与遍历攻击</div>
-                            <div class="switch-group">
-                                <div class="switch-item">
-                                    <div class="switch-item-left">
-                                        <div class="switch-item-icon high">📜</div>
-                                        <div class="switch-item-info">
-                                            <div class="switch-item-title">XSS 跨站脚本</div>
-                                            <div class="switch-item-desc">检测 &lt;script&gt;、javascript: 等 XSS payload</div>
-                                        </div>
-                                    </div>
-                                    <div class="switch-item-right">
-                                        <span class="severity-tag high">HIGH</span>
-                                        <div class="toggle-switch active" data-rule="xss" onclick="toggleRule(this)"></div>
-                                    </div>
-                                </div>
-
-                                <div class="switch-item">
-                                    <div class="switch-item-left">
-                                        <div class="switch-item-icon high">📁</div>
-                                        <div class="switch-item-info">
-                                            <div class="switch-item-title">路径遍历检测</div>
-                                            <div class="switch-item-desc">检测 ../ 等目录遍历 payload</div>
-                                        </div>
-                                    </div>
-                                    <div class="switch-item-right">
-                                        <span class="severity-tag high">HIGH</span>
-                                        <div class="toggle-switch active" data-rule="pathTraversal" onclick="toggleRule(this)"></div>
-                                    </div>
-                                </div>
-
-                                <div class="switch-item">
-                                    <div class="switch-item-left">
-                                        <div class="switch-item-icon critical">🔐</div>
-                                        <div class="switch-item-info">
-                                            <div class="switch-item-title">敏感文件访问</div>
-                                            <div class="switch-item-desc">检测 /etc/passwd、.env 等敏感文件访问</div>
-                                        </div>
-                                    </div>
-                                    <div class="switch-item-right">
-                                        <span class="severity-tag critical">CRITICAL</span>
-                                        <div class="toggle-switch active" data-rule="sensitiveFiles" onclick="toggleRule(this)"></div>
-                                    </div>
-                                </div>
-                            </div>
-
-                            <div class="section-divider">数据检测器</div>
-                            <div class="switch-group">
-                                <div class="switch-item">
-                                    <div class="switch-item-left">
-                                        <div class="switch-item-icon critical">🔑</div>
-                                        <div class="switch-item-info">
-                                            <div class="switch-item-title">密钥泄露检测</div>
-                                            <div class="switch-item-desc">检测 API Key、Token、私钥等</div>
-                                        </div>
-                                    </div>
-                                    <div class="switch-item-right">
-                                        <span class="severity-tag critical">CRITICAL</span>
-                                        <div class="toggle-switch active" data-detector="secrets" onclick="toggleRule(this)"></div>
-                                    </div>
-                                </div>
-
-                                <div class="switch-item">
-                                    <div class="switch-item-left">
-                                        <div class="switch-item-icon high">👤</div>
-                                        <div class="switch-item-info">
-                                            <div class="switch-item-title">PII 个人信息</div>
-                                            <div class="switch-item-desc">检测身份证、手机号、银行卡等</div>
-                                        </div>
-                                    </div>
-                                    <div class="switch-item-right">
-                                        <span class="severity-tag high">HIGH</span>
-                                        <div class="toggle-switch active" data-detector="pii" onclick="toggleRule(this)"></div>
-                                    </div>
-                                </div>
-
-                                <div class="switch-item">
-                                    <div class="switch-item-left">
-                                        <div class="switch-item-icon medium">🔤</div>
-                                        <div class="switch-item-info">
-                                            <div class="switch-item-title">Unicode 异常</div>
-                                            <div class="switch-item-desc">检测零宽字符、控制字符等异常 Unicode</div>
-                                        </div>
-                                    </div>
-                                    <div class="switch-item-right">
-                                        <span class="severity-tag medium">MEDIUM</span>
-                                        <div class="toggle-switch active" data-detector="unicode" onclick="toggleRule(this)"></div>
-                                    </div>
-                                </div>
-                            </div>
-
-                            <div class="action-group">
-                                <button class="btn btn-primary" onclick="testWaf1Connection()">
-                                    <span>🔌</span> 测试连接
-                                </button>
-                                <button class="btn btn-secondary" onclick="resetWaf1Stats()">
-                                    <span>🔄</span> 重置统计
-                                </button>
-                            </div>
-                            <div id="waf1-config-status"></div>
-                        </div>
+            <!-- 防护模式选择 -->
+            <div class="config-section">
+                <div class="config-section-header">
+                    <div class="config-section-title">
+                        <span>🔒</span> 防护模式
                     </div>
                 </div>
-
-                <!-- WAF2 LLM 配置 -->
-                <div class="accordion-item" data-accordion="waf2-llm">
-                    <div class="accordion-header" onclick="toggleAccordion('waf2-llm')">
-                        <div class="accordion-header-left">
-                            <div class="accordion-icon waf2">🤖</div>
-                            <div>
-                                <div class="accordion-title">WAF2 LLM 动态检测</div>
-                                <div class="accordion-subtitle">HTTP 流量层 AI 语义分析</div>
+                <div class="config-section-body">
+                    <div class="mode-selector">
+                        <!-- 完整防护模式 -->
+                        <div class="mode-card selected" data-mode="full" onclick="selectMode('full')">
+                            <div class="mode-card-radio"></div>
+                            <div class="mode-card-title">
+                                🛡️ 完整防护
                             </div>
+                            <div class="mode-card-subtitle">MCP Hub + WAF1 + WAF2</div>
+                            <div class="mode-card-features">
+                                <div class="mode-feature yes">✓ MCP 协议层防护 (WAF1)</div>
+                                <div class="mode-feature yes">✓ HTTP 流量层防护 (WAF2)</div>
+                                <div class="mode-feature yes">✓ 完整攻击日志与分析</div>
+                            </div>
+                            <div class="mode-card-hint">适合：企业级安全需求、生产环境</div>
                         </div>
-                        <div class="accordion-header-right">
-                            <span class="accordion-status active" id="waf2-status-badge">运行中</span>
-                            <span class="accordion-chevron">▼</span>
-                        </div>
-                    </div>
-                    <div class="accordion-content">
-                        <div class="accordion-body">
-                            <!-- 迷你统计 -->
-                            <div class="mini-stats">
-                                <div class="mini-stat-card">
-                                    <div class="mini-stat-value blue" id="cfg-waf2-total">0</div>
-                                    <div class="mini-stat-label">总请求</div>
-                                </div>
-                                <div class="mini-stat-card">
-                                    <div class="mini-stat-value red" id="cfg-waf2-blocked">0</div>
-                                    <div class="mini-stat-label">已拦截</div>
-                                </div>
-                                <div class="mini-stat-card">
-                                    <div class="mini-stat-value purple" id="cfg-waf2-llm">0</div>
-                                    <div class="mini-stat-label">LLM调用</div>
-                                </div>
-                                <div class="mini-stat-card">
-                                    <div class="mini-stat-value green" id="cfg-waf2-cache">0%</div>
-                                    <div class="mini-stat-label">缓存命中</div>
-                                </div>
-                            </div>
 
-                            <div class="section-divider">LLM 模型配置</div>
-                            <div class="model-selector" id="model-selector">
-                                <div class="model-option selected" data-model="qwen-turbo" onclick="selectModel(this)">
-                                    <div class="model-name">Qwen Turbo</div>
-                                    <div class="model-desc">快速响应，低延迟</div>
-                                </div>
-                                <div class="model-option" data-model="qwen-plus" onclick="selectModel(this)">
-                                    <div class="model-name">Qwen Plus</div>
-                                    <div class="model-desc">均衡性能</div>
-                                </div>
-                                <div class="model-option" data-model="qwen-max" onclick="selectModel(this)">
-                                    <div class="model-name">Qwen Max</div>
-                                    <div class="model-desc">高精度分析</div>
-                                </div>
-                                <div class="model-option" data-model="custom" onclick="selectModel(this)">
-                                    <div class="model-name">自定义</div>
-                                    <div class="model-desc">其他兼容 API</div>
-                                </div>
+                        <!-- 轻量防护模式 -->
+                        <div class="mode-card" data-mode="lite" onclick="selectMode('lite')">
+                            <div class="mode-card-radio"></div>
+                            <div class="mode-card-title">
+                                ⚡ 轻量防护
                             </div>
-
-                            <div class="section-divider">API 设置</div>
-                            <div class="config-group">
-                                <div class="config-row-inline">
-                                    <div class="config-field">
-                                        <label>API Key <span class="hint">(Qwen DashScope)</span></label>
-                                        <input type="password" id="cfg-llm-apikey" placeholder="sk-xxxx..." value="">
-                                    </div>
-                                    <div class="config-field">
-                                        <label>超时时间 <span class="hint">(毫秒)</span></label>
-                                        <input type="number" id="cfg-llm-timeout" value="30000" min="5000" max="120000">
-                                    </div>
-                                </div>
+                            <div class="mode-card-subtitle">仅 WAF2 代理</div>
+                            <div class="mode-card-features">
+                                <div class="mode-feature no">✗ 无 MCP 协议层防护</div>
+                                <div class="mode-feature yes">✓ HTTP 流量层防护 (WAF2)</div>
+                                <div class="mode-feature yes">✓ 保留原有 MCP 配置</div>
                             </div>
-
-                            <div class="section-divider">检测配置</div>
-                            <div class="switch-group">
-                                <div class="switch-item">
-                                    <div class="switch-item-left">
-                                        <div class="switch-item-icon high">📥</div>
-                                        <div class="switch-item-info">
-                                            <div class="switch-item-title">请求检测</div>
-                                            <div class="switch-item-desc">分析入站请求的攻击意图</div>
-                                        </div>
-                                    </div>
-                                    <div class="switch-item-right">
-                                        <div class="toggle-switch active" data-waf2="requestAnalysis" onclick="toggleRule(this)"></div>
-                                    </div>
-                                </div>
-
-                                <div class="switch-item">
-                                    <div class="switch-item-left">
-                                        <div class="switch-item-icon high">📤</div>
-                                        <div class="switch-item-info">
-                                            <div class="switch-item-title">响应检测</div>
-                                            <div class="switch-item-desc">检测响应中的敏感数据泄露</div>
-                                        </div>
-                                    </div>
-                                    <div class="switch-item-right">
-                                        <div class="toggle-switch active" data-waf2="responseAnalysis" onclick="toggleRule(this)"></div>
-                                    </div>
-                                </div>
-
-                                <div class="switch-item">
-                                    <div class="switch-item-left">
-                                        <div class="switch-item-icon medium">💾</div>
-                                        <div class="switch-item-info">
-                                            <div class="switch-item-title">结果缓存</div>
-                                            <div class="switch-item-desc">缓存 LLM 分析结果减少调用</div>
-                                        </div>
-                                    </div>
-                                    <div class="switch-item-right">
-                                        <div class="toggle-switch active" data-waf2="cache" onclick="toggleRule(this)"></div>
-                                    </div>
-                                </div>
-                            </div>
-
-                            <div class="action-group">
-                                <button class="btn btn-primary" onclick="testWaf2Connection()">
-                                    <span>🔌</span> 测试连接
-                                </button>
-                                <button class="btn btn-secondary" onclick="resetWaf2Stats()">
-                                    <span>🔄</span> 重置统计
-                                </button>
-                                <button class="btn btn-secondary" onclick="clearWaf2Cache()">
-                                    <span>🗑️</span> 清空缓存
-                                </button>
-                            </div>
-                            <div id="waf2-config-status"></div>
-                        </div>
-                    </div>
-                </div>
-
-                <!-- API 端点配置 -->
-                <div class="accordion-item" data-accordion="api-config">
-                    <div class="accordion-header" onclick="toggleAccordion('api-config')">
-                        <div class="accordion-header-left">
-                            <div class="accordion-icon api">🔗</div>
-                            <div>
-                                <div class="accordion-title">API 端点配置</div>
-                                <div class="accordion-subtitle">WAF 服务地址与刷新设置</div>
-                            </div>
-                        </div>
-                        <div class="accordion-header-right">
-                            <span class="accordion-status active">已配置</span>
-                            <span class="accordion-chevron">▼</span>
-                        </div>
-                    </div>
-                    <div class="accordion-content">
-                        <div class="accordion-body">
-                            <div class="config-group">
-                                <div class="config-row-inline">
-                                    <div class="config-field">
-                                        <label>WAF1 地址 <span class="hint">(MCP Hub)</span></label>
-                                        <input type="text" id="waf1-url" value="http://localhost:4000" placeholder="http://localhost:4000">
-                                    </div>
-                                    <div class="config-field">
-                                        <label>WAF2 地址 <span class="hint">(HTTP 代理)</span></label>
-                                        <input type="text" id="waf2-url" value="http://localhost:8081" placeholder="http://localhost:8081">
-                                    </div>
-                                </div>
-
-                                <div class="config-row-inline">
-                                    <div class="config-field">
-                                        <label>刷新间隔 <span class="hint">(毫秒)</span></label>
-                                        <input type="number" id="refresh-interval" value="5000" min="1000" max="60000" step="1000">
-                                    </div>
-                                    <div class="config-field">
-                                        <label>上游地址 <span class="hint">(目标应用)</span></label>
-                                        <input type="text" id="upstream-url" value="http://localhost:3000" placeholder="http://localhost:3000">
-                                    </div>
-                                </div>
-                            </div>
-
-                            <div class="action-group">
-                                <button class="btn btn-primary" onclick="saveApiConfig()">
-                                    <span>💾</span> 保存配置
-                                </button>
-                                <button class="btn btn-secondary" onclick="testAllConnections()">
-                                    <span>🔍</span> 测试所有连接
-                                </button>
-                            </div>
-                            <div id="api-config-status"></div>
-                        </div>
-                    </div>
-                </div>
-
-                <!-- 数据管理 -->
-                <div class="accordion-item" data-accordion="data-mgmt">
-                    <div class="accordion-header" onclick="toggleAccordion('data-mgmt')">
-                        <div class="accordion-header-left">
-                            <div class="accordion-icon data">📊</div>
-                            <div>
-                                <div class="accordion-title">数据管理</div>
-                                <div class="accordion-subtitle">统计重置与日志导出</div>
-                            </div>
-                        </div>
-                        <div class="accordion-header-right">
-                            <span class="accordion-chevron">▼</span>
-                        </div>
-                    </div>
-                    <div class="accordion-content">
-                        <div class="accordion-body">
-                            <div class="switch-group">
-                                <div class="switch-item">
-                                    <div class="switch-item-left">
-                                        <div class="switch-item-icon medium">📈</div>
-                                        <div class="switch-item-info">
-                                            <div class="switch-item-title">实时刷新</div>
-                                            <div class="switch-item-desc">自动刷新仪表盘数据</div>
-                                        </div>
-                                    </div>
-                                    <div class="switch-item-right">
-                                        <div class="toggle-switch active" id="auto-refresh-toggle" onclick="toggleAutoRefresh(this)"></div>
-                                    </div>
-                                </div>
-                            </div>
-
-                            <div class="action-group" style="border-top: none; padding-top: 0;">
-                                <button class="btn btn-primary" onclick="refreshData()">
-                                    <span>🔄</span> 立即刷新
-                                </button>
-                                <button class="btn btn-secondary" onclick="exportLogs()">
-                                    <span>📥</span> 导出日志
-                                </button>
-                                <button class="btn btn-danger" onclick="resetAllStats()">
-                                    <span>⚠️</span> 重置所有统计
-                                </button>
-                            </div>
-                            <div id="data-mgmt-status"></div>
+                            <div class="mode-card-hint">适合：快速体验、个人使用、低迁移成本</div>
                         </div>
                     </div>
                 </div>
             </div>
+
+            <!-- 快速配置 - 完整模式 -->
+            <div class="config-section" id="config-full" style="display: block;">
+                <div class="config-section-header">
+                    <div class="config-section-title">
+                        <span>⚙️</span> 快速配置 - 完整防护
+                    </div>
+                    <div class="config-section-actions">
+                        <button class="btn btn-primary" onclick="applyConfig()">应用配置</button>
+                    </div>
+                </div>
+                <div class="config-section-body">
+                    <div class="config-group">
+                        <div class="config-field">
+                            <label>MCP Hub 地址 <span class="hint">(Cursor 连接此地址)</span></label>
+                            <div class="input-with-copy">
+                                <input type="text" id="cfg-mcphub-url" value="http://localhost:4000" readonly>
+                                <button class="copy-btn" onclick="copyToClipboard('cfg-mcphub-url', this)">复制</button>
+                            </div>
+                        </div>
+
+                        <div class="config-row-inline">
+                            <div class="config-field">
+                                <label>目标应用地址</label>
+                                <input type="text" id="cfg-target-url" value="http://localhost:3000" placeholder="http://localhost:3000">
+                            </div>
+                            <div class="config-field">
+                                <label>WAF2 代理地址</label>
+                                <input type="text" id="cfg-waf2-url" value="http://localhost:8081" readonly>
+                            </div>
+                        </div>
+
+                        <div class="config-field">
+                            <label>LLM API Key <span class="hint">(Qwen DashScope)</span></label>
+                            <div class="input-with-copy">
+                                <input type="password" id="cfg-apikey" placeholder="sk-xxxx...">
+                                <button class="copy-btn" onclick="togglePasswordVisibility('cfg-apikey', this)" style="min-width: 60px;">显示</button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- 快速配置 - 轻量模式 -->
+            <div class="config-section" id="config-lite" style="display: none;">
+                <div class="config-section-header">
+                    <div class="config-section-title">
+                        <span>⚙️</span> 快速配置 - 轻量防护
+                    </div>
+                    <div class="config-section-actions">
+                        <button class="btn btn-primary" onclick="applyConfig()">应用配置</button>
+                    </div>
+                </div>
+                <div class="config-section-body">
+                    <div class="config-group">
+                        <div class="config-field">
+                            <label>WAF2 代理地址 <span class="hint">(复制到你的 MCP Server 配置)</span></label>
+                            <div class="input-with-copy">
+                                <input type="text" id="cfg-waf2-proxy" value="http://localhost:8081" readonly>
+                                <button class="copy-btn" onclick="copyToClipboard('cfg-waf2-proxy', this)">复制</button>
+                            </div>
+                        </div>
+
+                        <div class="config-field">
+                            <label>目标应用地址 <span class="hint">(WAF2 转发的上游地址)</span></label>
+                            <input type="text" id="cfg-target-url-lite" value="http://localhost:3000" placeholder="http://localhost:3000">
+                        </div>
+
+                        <div class="config-field">
+                            <label>LLM API Key <span class="hint">(Qwen DashScope)</span></label>
+                            <div class="input-with-copy">
+                                <input type="password" id="cfg-apikey-lite" placeholder="sk-xxxx...">
+                                <button class="copy-btn" onclick="togglePasswordVisibility('cfg-apikey-lite', this)" style="min-width: 60px;">显示</button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- 配置指引 -->
+            <div class="config-section">
+                <div class="config-section-header" onclick="toggleAccordion('config-guide')" style="cursor: pointer;">
+                    <div class="config-section-title">
+                        <span>📋</span> 配置指引
+                    </div>
+                    <span class="accordion-chevron" id="config-guide-chevron">▼</span>
+                </div>
+                <div class="accordion-content" id="config-guide-content">
+                    <div class="config-section-body">
+                        <!-- 完整模式指引 -->
+                        <div id="guide-full">
+                            <p style="color: #aaa; margin-bottom: 16px;">修改你的 Cursor MCP 配置，连接到 MCP Hub：</p>
+                            <div class="code-block">
+                                <button class="code-block-copy" onclick="copyCodeBlock(this)">复制</button>
+<code><span class="comment">// ~/.cursor/mcp.json</span>
+{
+  <span class="key">"mcpServers"</span>: {
+    <span class="key">"guardrails"</span>: {
+      <span class="key">"url"</span>: <span class="string">"http://localhost:4000"</span>
+    }
+  }
+}</code>
+                            </div>
+                        </div>
+
+                        <!-- 轻量模式指引 -->
+                        <div id="guide-lite" style="display: none;">
+                            <p style="color: #aaa; margin-bottom: 16px;">只需一步：将 MCP Server 的 REST_BASE_URL 改为 WAF2 地址</p>
+                            <div class="code-block">
+                                <button class="code-block-copy" onclick="copyCodeBlock(this)">复制</button>
+<code><span class="comment"># 原配置</span>
+REST_BASE_URL=http://localhost:3000
+
+<span class="comment"># 改为 ↓</span>
+REST_BASE_URL=<span class="string">http://localhost:8081</span></code>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- WAF 规则开关 -->
+            <div class="config-section">
+                <div class="config-section-header">
+                    <div class="config-section-title">
+                        <span>🛡️</span> WAF 规则开关
+                    </div>
+                </div>
+                <div class="config-section-body">
+                    <div class="waf-rules-grid">
+                        <!-- WAF1 规则 -->
+                        <div class="waf-rules-column" id="waf1-rules-column">
+                            <div class="waf-rules-column-title">
+                                <span style="color: #667eea;">●</span> WAF1 静态检测
+                                <span style="font-size: 11px; color: #666; font-weight: normal;">(完整模式)</span>
+                            </div>
+                            <div class="waf-rule-row">
+                                <span class="waf-rule-name">SQL 注入</span>
+                                <div class="toggle-sm active" data-rule="sql" onclick="toggleRuleSm(this)"></div>
+                            </div>
+                            <div class="waf-rule-row">
+                                <span class="waf-rule-name">命令注入</span>
+                                <div class="toggle-sm active" data-rule="cmd" onclick="toggleRuleSm(this)"></div>
+                            </div>
+                            <div class="waf-rule-row">
+                                <span class="waf-rule-name">XSS</span>
+                                <div class="toggle-sm active" data-rule="xss" onclick="toggleRuleSm(this)"></div>
+                            </div>
+                            <div class="waf-rule-row">
+                                <span class="waf-rule-name">路径遍历</span>
+                                <div class="toggle-sm active" data-rule="path" onclick="toggleRuleSm(this)"></div>
+                            </div>
+                            <div class="waf-rule-row">
+                                <span class="waf-rule-name">敏感文件</span>
+                                <div class="toggle-sm active" data-rule="sensitive" onclick="toggleRuleSm(this)"></div>
+                            </div>
+                        </div>
+
+                        <!-- WAF2 规则 -->
+                        <div class="waf-rules-column">
+                            <div class="waf-rules-column-title">
+                                <span style="color: #f5576c;">●</span> WAF2 LLM 检测
+                            </div>
+                            <div class="waf-rule-row">
+                                <span class="waf-rule-name">请求分析</span>
+                                <div class="toggle-sm active" data-rule="req" onclick="toggleRuleSm(this)"></div>
+                            </div>
+                            <div class="waf-rule-row">
+                                <span class="waf-rule-name">响应检测</span>
+                                <div class="toggle-sm active" data-rule="res" onclick="toggleRuleSm(this)"></div>
+                            </div>
+                            <div class="waf-rule-row">
+                                <span class="waf-rule-name">结果缓存</span>
+                                <div class="toggle-sm active" data-rule="cache" onclick="toggleRuleSm(this)"></div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- 数据管理 -->
+            <div class="config-section">
+                <div class="config-section-header">
+                    <div class="config-section-title">
+                        <span>📊</span> 数据管理
+                    </div>
+                </div>
+                <div class="config-section-body">
+                    <div class="action-group" style="margin-top: 0; padding-top: 0; border-top: none;">
+                        <button class="btn btn-primary" onclick="refreshData()">
+                            <span>🔄</span> 刷新数据
+                        </button>
+                        <button class="btn btn-secondary" onclick="exportLogs()">
+                            <span>📥</span> 导出日志
+                        </button>
+                        <button class="btn btn-danger" onclick="resetAllStats()">
+                            <span>⚠️</span> 重置统计
+                        </button>
+                    </div>
+                    <div id="config-status"></div>
+                </div>
+            </div>
+
         </div>
     </div>
 
@@ -2029,6 +2153,7 @@
         document.addEventListener('DOMContentLoaded', () => {
             initTabs();
             loadConfig();
+            initConfigPanel();
             refreshData();
             fetchMcpServers();
             startAutoRefresh();
@@ -2378,8 +2503,219 @@
 
         // ==================== 配置面板功能 (cc-switch 风格) ====================
 
+        // 当前防护模式
+        let currentMode = 'full';
+
+        // 防护模式选择 (调用后端 API)
+        async function selectMode(mode) {
+            currentMode = mode;
+
+            // 更新卡片选中状态
+            document.querySelectorAll('.mode-card').forEach(card => {
+                card.classList.toggle('selected', card.dataset.mode === mode);
+            });
+
+            // 切换配置区块显示
+            document.getElementById('config-full').style.display = mode === 'full' ? 'block' : 'none';
+            document.getElementById('config-lite').style.display = mode === 'lite' ? 'block' : 'none';
+
+            // 切换配置指引显示
+            document.getElementById('guide-full').style.display = mode === 'full' ? 'block' : 'none';
+            document.getElementById('guide-lite').style.display = mode === 'lite' ? 'block' : 'none';
+
+            // 切换 WAF1 规则区块状态
+            const waf1Column = document.getElementById('waf1-rules-column');
+            if (waf1Column) {
+                waf1Column.classList.toggle('disabled', mode === 'lite');
+            }
+
+            // 调用后端 API 切换模式
+            try {
+                const resp = await fetch(`${WAF1_URL}/api/config/mode`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ mode })
+                });
+                const data = await resp.json();
+                if (data.success) {
+                    showConfigStatus('config-status', 'success', data.message);
+                } else {
+                    showConfigStatus('config-status', 'error', data.error || '切换失败');
+                }
+            } catch (e) {
+                // 后端不可用时仅保存到本地
+                localStorage.setItem('protection_mode', mode);
+                showConfigStatus('config-status', 'info', `已切换到${mode === 'full' ? '完整防护' : '轻量防护'}模式 (本地)`);
+            }
+        }
+
+        // 复制到剪贴板
+        function copyToClipboard(inputId, btn) {
+            const input = document.getElementById(inputId);
+            navigator.clipboard.writeText(input.value).then(() => {
+                const originalText = btn.textContent;
+                btn.textContent = '已复制';
+                btn.classList.add('copied');
+                setTimeout(() => {
+                    btn.textContent = originalText;
+                    btn.classList.remove('copied');
+                }, 2000);
+            });
+        }
+
+        // 复制代码块
+        function copyCodeBlock(btn) {
+            const codeBlock = btn.parentElement;
+            const code = codeBlock.querySelector('code').textContent;
+            navigator.clipboard.writeText(code).then(() => {
+                const originalText = btn.textContent;
+                btn.textContent = '已复制!';
+                setTimeout(() => {
+                    btn.textContent = originalText;
+                }, 2000);
+            });
+        }
+
+        // 切换密码可见性
+        function togglePasswordVisibility(inputId, btn) {
+            const input = document.getElementById(inputId);
+            if (input.type === 'password') {
+                input.type = 'text';
+                btn.textContent = '隐藏';
+            } else {
+                input.type = 'password';
+                btn.textContent = '显示';
+            }
+        }
+
+        // 紧凑开关切换
+        function toggleRuleSm(el) {
+            el.classList.toggle('active');
+        }
+
+        // 应用配置 (调用后端 API)
+        async function applyConfig() {
+            let targetUrl, apiKey;
+
+            if (currentMode === 'full') {
+                targetUrl = document.getElementById('cfg-target-url').value;
+                apiKey = document.getElementById('cfg-apikey').value;
+            } else {
+                targetUrl = document.getElementById('cfg-target-url-lite').value;
+                apiKey = document.getElementById('cfg-apikey-lite').value;
+            }
+
+            // 调用后端 API 保存配置
+            try {
+                const resp = await fetch(`${WAF1_URL}/api/config/waf2`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        upstream: targetUrl,
+                        llm: apiKey ? { apiKey } : undefined
+                    })
+                });
+                const data = await resp.json();
+                if (data.success) {
+                    showConfigStatus('config-status', 'success', '配置已保存到服务器');
+                } else {
+                    showConfigStatus('config-status', 'error', data.error || '保存失败');
+                }
+            } catch (e) {
+                // 后端不可用时保存到本地
+                localStorage.setItem('target_url', targetUrl);
+                if (apiKey) localStorage.setItem('llm_apikey', apiKey);
+                showConfigStatus('config-status', 'warning', '配置已保存到本地 (服务器不可用)');
+            }
+        }
+
+        // 显示配置状态 (通用)
+        function showConfigStatus(containerId, type, message) {
+            const container = document.getElementById(containerId);
+            if (!container) return;
+
+            container.innerHTML = `
+                <div class="status-message ${type}">
+                    <span>${type === 'success' ? '✓' : type === 'error' ? '✗' : type === 'warning' ? '⚠' : 'ℹ'}</span>
+                    <span>${message}</span>
+                </div>
+            `;
+
+            // 自动清除
+            setTimeout(() => {
+                container.innerHTML = '';
+            }, 5000);
+        }
+
+        // 初始化配置面板 (从后端加载配置)
+        async function initConfigPanel() {
+            try {
+                // 从后端获取配置
+                const resp = await fetch(`${WAF1_URL}/api/config`);
+                if (resp.ok) {
+                    const config = await resp.json();
+
+                    // 应用模式 (不触发 API 调用，只更新 UI)
+                    currentMode = config.mode || 'full';
+                    document.querySelectorAll('.mode-card').forEach(card => {
+                        card.classList.toggle('selected', card.dataset.mode === currentMode);
+                    });
+                    document.getElementById('config-full').style.display = currentMode === 'full' ? 'block' : 'none';
+                    document.getElementById('config-lite').style.display = currentMode === 'lite' ? 'block' : 'none';
+                    document.getElementById('guide-full').style.display = currentMode === 'full' ? 'block' : 'none';
+                    document.getElementById('guide-lite').style.display = currentMode === 'lite' ? 'block' : 'none';
+                    const waf1Column = document.getElementById('waf1-rules-column');
+                    if (waf1Column) waf1Column.classList.toggle('disabled', currentMode === 'lite');
+
+                    // 填充配置值
+                    if (config.waf2?.upstream) {
+                        const targetFull = document.getElementById('cfg-target-url');
+                        const targetLite = document.getElementById('cfg-target-url-lite');
+                        if (targetFull) targetFull.value = config.waf2.upstream;
+                        if (targetLite) targetLite.value = config.waf2.upstream;
+                    }
+
+                    console.log('[Config] 已从服务器加载配置:', config.mode);
+                    return;
+                }
+            } catch (e) {
+                console.log('[Config] 无法从服务器加载配置，使用本地存储');
+            }
+
+            // 后备：从本地存储加载
+            const savedMode = localStorage.getItem('protection_mode') || 'full';
+            currentMode = savedMode;
+            document.querySelectorAll('.mode-card').forEach(card => {
+                card.classList.toggle('selected', card.dataset.mode === currentMode);
+            });
+            document.getElementById('config-full').style.display = currentMode === 'full' ? 'block' : 'none';
+            document.getElementById('config-lite').style.display = currentMode === 'lite' ? 'block' : 'none';
+            document.getElementById('guide-full').style.display = currentMode === 'full' ? 'block' : 'none';
+            document.getElementById('guide-lite').style.display = currentMode === 'lite' ? 'block' : 'none';
+
+            const savedTarget = localStorage.getItem('target_url');
+            if (savedTarget) {
+                const targetFull = document.getElementById('cfg-target-url');
+                const targetLite = document.getElementById('cfg-target-url-lite');
+                if (targetFull) targetFull.value = savedTarget;
+                if (targetLite) targetLite.value = savedTarget;
+            }
+        }
+
         // 手风琴切换
         function toggleAccordion(id) {
+            // 处理配置指引特殊情况
+            if (id === 'config-guide') {
+                const content = document.getElementById('config-guide-content');
+                const chevron = document.getElementById('config-guide-chevron');
+                if (content && chevron) {
+                    const isExpanded = content.style.maxHeight && content.style.maxHeight !== '0px';
+                    content.style.maxHeight = isExpanded ? '0px' : '500px';
+                    chevron.style.transform = isExpanded ? 'rotate(0deg)' : 'rotate(180deg)';
+                }
+                return;
+            }
+
             const item = document.querySelector(`[data-accordion="${id}"]`);
             if (item) {
                 item.classList.toggle('expanded');
