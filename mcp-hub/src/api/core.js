@@ -126,6 +126,9 @@ export function registerMarketplaceRoutes(getServiceManager) {
       const { search, category, tags, sort } = req.query;
       const serviceManager = getServiceManager();
       try {
+        if (!serviceManager?.marketplace) {
+          return res.status(503).json({ error: "Marketplace 未就绪" });
+        }
         const servers = await serviceManager.marketplace.getCatalog({
           search,
           category,
@@ -152,6 +155,9 @@ export function registerMarketplaceRoutes(getServiceManager) {
       const { mcpId } = req.body;
       const serviceManager = getServiceManager();
       try {
+        if (!serviceManager?.marketplace) {
+          return res.status(503).json({ error: "Marketplace 未就绪" });
+        }
         if (!mcpId) {
           throw new ValidationError("Missing mcpId in request body");
         }
@@ -185,6 +191,9 @@ export function registerWorkspacesRoute(getServiceManager) {
     async (req, res) => {
       const serviceManager = getServiceManager();
       try {
+        if (!serviceManager?.workspaceCache) {
+          return res.status(503).json({ error: "Workspace Cache 未就绪" });
+        }
         const workspaces = await serviceManager.workspaceCache.getActiveWorkspaces();
         res.json({
           workspaces,
@@ -207,6 +216,9 @@ export function registerRestartRoutes(getServiceManager) {
   registerRoute("POST", "/restart", "Restart MCP Hub", async (req, res) => {
     const serviceManager = getServiceManager();
     try {
+      if (!serviceManager?.mcpHub) {
+        return res.status(503).json({ error: "MCP Hub 未就绪" });
+      }
       await serviceManager.restartHub();
       res.json({
         status: "ok",
@@ -221,7 +233,7 @@ export function registerRestartRoutes(getServiceManager) {
   registerRoute("POST", "/hard-restart", "Hard Restart MCP Hub", async (req, res) => {
     const serviceManager = getServiceManager();
     try {
-      if (serviceManager.mcpHub) {
+      if (serviceManager?.mcpHub) {
         serviceManager.setState(HubState.RESTARTING);
         process.emit('SIGTERM');
       }

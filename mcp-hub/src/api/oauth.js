@@ -26,6 +26,9 @@ export function registerOAuthRoutes(getServiceManager) {
       let code, server_name;
       const serviceManager = getServiceManager();
       try {
+        if (!serviceManager?.mcpHub) {
+          return res.status(503).json({ error: "MCP Hub 未就绪" });
+        }
         const { url } = req.body || {};
         if (!url) {
           throw new ValidationError("Missing URL parameter", { field: "url" });
@@ -74,6 +77,9 @@ export function registerOAuthRoutes(getServiceManager) {
       const serviceManager = getServiceManager();
 
       try {
+        if (!serviceManager?.mcpHub) {
+          return res.status(503).send('MCP Hub 未就绪');
+        }
         if (!code || !server_name) {
           throw new ValidationError("Missing code or server_name parameter");
         }
@@ -131,13 +137,19 @@ export function registerOAuthRoutes(getServiceManager) {
 
       } catch (error) {
         logger.error('OAUTH_CALLBACK_ERROR', `Error during OAuth callback: ${error.message}`, {}, false);
-        res.write(`<script>updateStatus("error", "${error.message.replace(/"/g, '\\"')}");</script>`);
+        // 安全转义错误消息
+        const safeMessage = error.message.replace(/[<>"'&]/g, (c) => ({
+          '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;', '&': '&amp;'
+        }[c]));
+        res.write(`<script>updateStatus("error", "${safeMessage}");</script>`);
       } finally {
-        serviceManager.broadcastSubscriptionEvent(SubscriptionTypes.SERVERS_UPDATED, {
-          changes: {
-            modified: [server_name],
-          }
-        });
+        if (serviceManager) {
+          serviceManager.broadcastSubscriptionEvent(SubscriptionTypes.SERVERS_UPDATED, {
+            changes: {
+              modified: [server_name],
+            }
+          });
+        }
         res.end();
       }
     }

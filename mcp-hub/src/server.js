@@ -5,6 +5,8 @@
 
 import express from "express";
 import cors from "cors";
+import path from "path";
+import { fileURLToPath } from "url";
 import logger from "./utils/logger.js";
 import {
   router,
@@ -77,13 +79,27 @@ applyWaf1Config();
 
 // ==================== Express App ====================
 
+// 获取当前文件目录 (ES Module 兼容)
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+
 const app = express();
 app.use(cors());
 app.use(express.json());
 
-// Dashboard 主页
+// Dashboard 主页 (支持 Docker 和本地开发)
 app.get('/', (req, res) => {
-  res.sendFile('/app/src/dashboard.html');
+  // Docker 环境使用 /app/src/dashboard.html
+  // 本地开发使用相对路径
+  const dockerPath = '/app/src/dashboard.html';
+  const localPath = path.join(__dirname, 'dashboard.html');
+
+  // 优先尝试 Docker 路径，失败则使用本地路径
+  res.sendFile(dockerPath, (err) => {
+    if (err) {
+      res.sendFile(localPath);
+    }
+  });
 });
 
 // ==================== 注册 API 路由 ====================

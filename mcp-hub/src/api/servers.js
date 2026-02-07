@@ -23,6 +23,9 @@ export function registerServerRoutes(getServiceManager) {
     "List all MCP servers and their status",
     (req, res) => {
       const serviceManager = getServiceManager();
+      if (!serviceManager?.mcpHub) {
+        return res.status(503).json({ error: "MCP Hub 未就绪" });
+      }
       const servers = serviceManager.mcpHub.getAllServerStatuses();
       res.json({
         servers,
@@ -40,6 +43,9 @@ export function registerServerRoutes(getServiceManager) {
       const { server_name } = req.body;
       const serviceManager = getServiceManager();
       try {
+        if (!serviceManager?.mcpHub) {
+          return res.status(503).json({ error: "MCP Hub 未就绪" });
+        }
         if (!server_name) {
           throw new ValidationError("Missing server name", { field: "server_name" });
         }
@@ -65,6 +71,9 @@ export function registerServerRoutes(getServiceManager) {
       const { server_name } = req.body;
       const serviceManager = getServiceManager();
       try {
+        if (!serviceManager?.mcpHub) {
+          return res.status(503).json({ error: "MCP Hub 未就绪" });
+        }
         if (!server_name) {
           throw new ValidationError("Missing server name", { field: "server_name" });
         }
@@ -77,11 +86,13 @@ export function registerServerRoutes(getServiceManager) {
       } catch (error) {
         throw wrapError(error, "SERVER_START_ERROR", { server: server_name });
       } finally {
-        serviceManager.broadcastSubscriptionEvent(SubscriptionTypes.SERVERS_UPDATED, {
-          changes: {
-            modified: [server_name],
-          }
-        });
+        if (serviceManager) {
+          serviceManager.broadcastSubscriptionEvent(SubscriptionTypes.SERVERS_UPDATED, {
+            changes: {
+              modified: [server_name],
+            }
+          });
+        }
       }
     }
   );
@@ -95,6 +106,9 @@ export function registerServerRoutes(getServiceManager) {
       const { server_name } = req.body;
       const serviceManager = getServiceManager();
       try {
+        if (!serviceManager?.mcpHub) {
+          return res.status(503).json({ error: "MCP Hub 未就绪" });
+        }
         if (!server_name) {
           throw new ValidationError("Missing server name", { field: "server_name" });
         }
@@ -111,11 +125,13 @@ export function registerServerRoutes(getServiceManager) {
       } catch (error) {
         throw wrapError(error, "SERVER_STOP_ERROR", { server: server_name });
       } finally {
-        serviceManager.broadcastSubscriptionEvent(SubscriptionTypes.SERVERS_UPDATED, {
-          changes: {
-            modified: [server_name],
-          }
-        });
+        if (serviceManager) {
+          serviceManager.broadcastSubscriptionEvent(SubscriptionTypes.SERVERS_UPDATED, {
+            changes: {
+              modified: [server_name],
+            }
+          });
+        }
       }
     }
   );
@@ -129,6 +145,9 @@ export function registerServerRoutes(getServiceManager) {
       const { server_name } = req.body;
       const serviceManager = getServiceManager();
       try {
+        if (!serviceManager?.mcpHub) {
+          return res.status(503).json({ error: "MCP Hub 未就绪" });
+        }
         if (!server_name) {
           throw new ValidationError("Missing server name", { field: "server_name" });
         }
@@ -152,6 +171,9 @@ export function registerServerRoutes(getServiceManager) {
     async (req, res) => {
       const serviceManager = getServiceManager();
       try {
+        if (!serviceManager?.mcpHub) {
+          return res.status(503).json({ error: "MCP Hub 未就绪" });
+        }
         const results = await serviceManager.mcpHub.refreshAllServers();
         res.json({
           status: "ok",
@@ -173,6 +195,9 @@ export function registerServerRoutes(getServiceManager) {
       const { server_name, tool, arguments: args, request_options } = req.body;
       const serviceManager = getServiceManager();
       try {
+        if (!serviceManager?.mcpHub) {
+          return res.status(503).json({ error: "MCP Hub 未就绪" });
+        }
         if (!server_name) {
           throw new ValidationError("Missing server name", { field: "server_name" });
         }
@@ -208,6 +233,9 @@ export function registerServerRoutes(getServiceManager) {
       const { server_name, prompt, arguments: args, request_options } = req.body;
       const serviceManager = getServiceManager();
       try {
+        if (!serviceManager?.mcpHub) {
+          return res.status(503).json({ error: "MCP Hub 未就绪" });
+        }
         if (!server_name) {
           throw new ValidationError("Missing server name", { field: "server_name" });
         }
@@ -243,6 +271,9 @@ export function registerServerRoutes(getServiceManager) {
       const { server_name, uri, request_options } = req.body;
       const serviceManager = getServiceManager();
       try {
+        if (!serviceManager?.mcpHub) {
+          return res.status(503).json({ error: "MCP Hub 未就绪" });
+        }
         if (!server_name) {
           throw new ValidationError("Missing server name", { field: "server_name" });
         }
@@ -273,6 +304,9 @@ export function registerServerRoutes(getServiceManager) {
       const { server_name } = req.body;
       const serviceManager = getServiceManager();
       try {
+        if (!serviceManager?.mcpHub) {
+          return res.status(503).json({ error: "MCP Hub 未就绪" });
+        }
         if (!server_name) {
           throw new ValidationError("Missing server name", { field: "server_name" });
         }
