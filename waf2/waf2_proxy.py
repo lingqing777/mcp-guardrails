@@ -38,12 +38,34 @@ app.add_middleware(
 
 # ==================== 配置 ====================
 import os
+from pydantic import BaseModel
 
-UPSTREAM = os.environ.get("UPSTREAM", "http://127.0.0.1:3000")
-QWEN_API_KEY = os.environ.get("QWEN_API_KEY", "sk-9e24ea719c084c1e881f097fa450b7b6")
-QWEN_MODEL = os.environ.get("QWEN_MODEL", "qwen-turbo")
+# 动态配置 (可通过 API 修改)
+class WAF2Config:
+    def __init__(self):
+        self.enabled = True
+        self.upstream = os.environ.get("UPSTREAM", "http://127.0.0.1:3000")
+        self.api_key = os.environ.get("QWEN_API_KEY", "")
+        self.model = os.environ.get("QWEN_MODEL", "qwen-turbo")
+        self.request_analysis = True
+        self.response_analysis = True
+        self.cache_enabled = True
+
+config = WAF2Config()
+
+# 兼容旧变量名
 QWEN_API_URL = "https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions"
 LOG_FILE = "waf2_log.json"
+
+# 配置更新模型
+class ConfigUpdate(BaseModel):
+    enabled: Optional[bool] = None
+    upstream: Optional[str] = None
+    api_key: Optional[str] = None
+    model: Optional[str] = None
+    request_analysis: Optional[bool] = None
+    response_analysis: Optional[bool] = None
+    cache_enabled: Optional[bool] = None
 
 # ==================== 缓存机制 ====================
 
@@ -168,16 +190,20 @@ RESPONSE_ANALYSIS_PROMPT = """你是一个数据泄露防护专家。分析以�
 # ==================== 核心检测函数 ====================
 
 def call_llm(prompt: str) -> str:
-    """调用 LLM API"""
+    """调用 LLM API (使用动态配置)"""
+    if not config.api_key:
+        print("[WAF2] 警告: 未配置 API Key，跳过 LLM 检测")
+        return "PASS"
+
     try:
         resp = requests.post(
             QWEN_API_URL,
             headers={
-                "Authorization": f"Bearer {QWEN_API_KEY}",
+                "Authorization": f"Bearer {config.api_key}",
                 "Content-Type": "application/json"
             },
             json={
-                "model": QWEN_MODEL,
+                "model": config.model,
                 "messages": [{"role": "user", "content": prompt}],
                 "temperature": 0,
                 "max_tokens": 100
@@ -192,12 +218,18 @@ def call_llm(prompt: str) -> str:
 
 def analyze_request(method: str, path: str, body: str) -> Dict[str, Any]:
     """分析请求 (带缓存)"""
+    # 检查请求分析是否启用
+    if not config.request_analysis:
+        return {'blocked': False, 'direction': 'request'}
+
     cache_key = f"req:{method}:{path}:{body[:200]}"
 
-    cached = llm_cache.get(cache_key)
-    if cached:
-        stats['cache_hits'] += 1
-        return cached
+    # 检查缓存是否启用
+    if config.cache_enabled:
+        cached = llm_cache.get(cache_key)
+        if cached:
+            stats['cache_hits'] += 1
+            return cached
 
     stats['llm_calls'] += 1
     prompt = REQUEST_ANALYSIS_PROMPT.format(
@@ -210,12 +242,17 @@ def analyze_request(method: str, path: str, body: str) -> Dict[str, Any]:
     print(f"[WAF2] 请求分析: {result}")
 
     parsed = parse_llm_result(result, 'request')
-    llm_cache.set(cache_key, parsed)
+    if config.cache_enabled:
+        llm_cache.set(cache_key, parsed)
     return parsed
 
 
 def analyze_response(status_code: int, body: str) -> Dict[str, Any]:
     """分析响应 (检测数据泄露)"""
+    # 检查响应分析是否启用
+    if not config.response_analysis:
+        return {'blocked': False, 'direction': 'response'}
+
     if status_code >= 400:
         return {'blocked': False, 'direction': 'response'}
 
@@ -224,10 +261,12 @@ def analyze_response(status_code: int, body: str) -> Dict[str, Any]:
 
     cache_key = f"resp:{status_code}:{body[:200]}"
 
-    cached = llm_cache.get(cache_key)
-    if cached:
-        stats['cache_hits'] += 1
-        return cached
+    # 检查缓存是否启用
+    if config.cache_enabled:
+        cached = llm_cache.get(cache_key)
+        if cached:
+            stats['cache_hits'] += 1
+            return cached
 
     stats['llm_calls'] += 1
     prompt = RESPONSE_ANALYSIS_PROMPT.format(
@@ -239,7 +278,8 @@ def analyze_response(status_code: int, body: str) -> Dict[str, Any]:
     print(f"[WAF2] 响应分析: {result}")
 
     parsed = parse_llm_result(result, 'response')
-    llm_cache.set(cache_key, parsed)
+    if config.cache_enabled:
+        llm_cache.set(cache_key, parsed)
     return parsed
 
 
@@ -285,6 +325,61 @@ def log_detection(data: Dict):
         pass
 
 # ==================== 统计 API (必须在代理路由之前注册) ====================
+
+@app.get("/waf2/config")
+async def get_config():
+    """获取当前配置"""
+    return {
+        'enabled': config.enabled,
+        'upstream': config.upstream,
+        'model': config.model,
+        'has_api_key': bool(config.api_key),
+        'request_analysis': config.request_analysis,
+        'response_analysis': config.response_analysis,
+        'cache_enabled': config.cache_enabled,
+    }
+
+
+@app.post("/waf2/config")
+async def update_config(update: ConfigUpdate):
+    """更新配置"""
+    if update.enabled is not None:
+        config.enabled = update.enabled
+    if update.upstream is not None:
+        config.upstream = update.upstream
+    if update.api_key is not None:
+        config.api_key = update.api_key
+    if update.model is not None:
+        config.model = update.model
+    if update.request_analysis is not None:
+        config.request_analysis = update.request_analysis
+    if update.response_analysis is not None:
+        config.response_analysis = update.response_analysis
+    if update.cache_enabled is not None:
+        config.cache_enabled = update.cache_enabled
+
+    print(f"[WAF2] 配置已更新: enabled={config.enabled}, upstream={config.upstream}")
+    return {
+        'success': True,
+        'message': '配置已更新',
+        'config': {
+            'enabled': config.enabled,
+            'upstream': config.upstream,
+            'model': config.model,
+            'has_api_key': bool(config.api_key),
+            'request_analysis': config.request_analysis,
+            'response_analysis': config.response_analysis,
+            'cache_enabled': config.cache_enabled,
+        }
+    }
+
+
+@app.post("/waf2/cache/clear")
+async def clear_cache():
+    """清空 LLM 缓存"""
+    llm_cache.cache.clear()
+    return {'success': True, 'message': '缓存已清空'}
+
 
 @app.get("/waf2/stats")
 async def get_stats():
@@ -360,8 +455,10 @@ async def health_check():
     """健康检查"""
     return {
         'status': 'healthy',
-        'upstream': UPSTREAM,
-        'model': QWEN_MODEL,
+        'enabled': config.enabled,
+        'upstream': config.upstream,
+        'model': config.model,
+        'has_api_key': bool(config.api_key),
         'cache_size': len(llm_cache.cache),
     }
 
@@ -382,6 +479,28 @@ async def proxy(path: str, request: Request):
     print(f"[WAF2] {request.method} /{path}")
     if body:
         print(f"[WAF2] Body: {body[:100]}...")
+
+    # ========== 检查 WAF2 是否启用 ==========
+    if not config.enabled:
+        print(f"[WAF2] ⏸️ WAF2 已禁用，直接转发")
+        try:
+            async with httpx.AsyncClient(timeout=30.0) as client:
+                headers = {k: v for k, v in request.headers.items()
+                          if k.lower() not in ["host", "content-length"]}
+                upstream_resp = await client.request(
+                    request.method,
+                    f"{config.upstream}/{path}",
+                    content=body.encode() if body else None,
+                    headers=headers
+                )
+            stats['passed'] += 1
+            return Response(
+                content=upstream_resp.content,
+                status_code=upstream_resp.status_code,
+                headers=dict(upstream_resp.headers)
+            )
+        except Exception as e:
+            return Response(content=f"上游服务错误: {e}", status_code=502)
 
     # ========== 阶段1: 请求检测 ==========
     req_result = analyze_request(request.method, f"/{path}", body)
@@ -426,7 +545,7 @@ async def proxy(path: str, request: Request):
 
             upstream_resp = await client.request(
                 request.method,
-                f"{UPSTREAM}/{path}",
+                f"{config.upstream}/{path}",
                 content=body.encode() if body else None,
                 headers=headers
             )
@@ -494,8 +613,10 @@ if __name__ == "__main__":
     print("  WAF2 - MCP Guardrails 动态防火墙")
     print("=" * 50)
     print(f"  监听端口: 8081")
-    print(f"  上游地址: {UPSTREAM}")
-    print(f"  LLM 模型: {QWEN_MODEL}")
+    print(f"  上游地址: {config.upstream}")
+    print(f"  LLM 模型: {config.model}")
+    print(f"  API Key: {'已配置' if config.api_key else '未配置'}")
     print(f"  功能: 请求检测 + 响应检测 + 缓存")
+    print(f"  配置 API: GET/POST /waf2/config")
     print("=" * 50)
     uvicorn.run(app, host="0.0.0.0", port=8081)

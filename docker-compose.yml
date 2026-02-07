@@ -16,7 +16,7 @@ services:
       - "8081:8081"
     environment:
       - UPSTREAM=http://juice-shop:3000
-      - QWEN_API_KEY=${QWEN_API_KEY:-sk-your-api-key}
+      - QWEN_API_KEY=${QWEN_API_KEY:-}
     depends_on:
       - juice-shop
     networks:
@@ -33,6 +33,10 @@ services:
       - waf2
     ports:
       - "4000:4000"
+    environment:
+      - GUARDRAILS_CONFIG=/app/config/guardrails-config.json
+    volumes:
+      - ./config:/app/config
 
 networks:
   mcp-net:

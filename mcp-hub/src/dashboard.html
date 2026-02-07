@@ -2179,38 +2179,20 @@ REST_BASE_URL=<span class="string">http://localhost:8081</span></code>
         }
 
         function loadConfig() {
+            // 从 localStorage 加载 URL 配置
             const savedWaf1 = localStorage.getItem('waf1_url');
             const savedWaf2 = localStorage.getItem('waf2_url');
             const savedInterval = localStorage.getItem('refresh_interval');
 
-            if (savedWaf1) {
-                WAF1_URL = savedWaf1;
-                document.getElementById('waf1-url').value = savedWaf1;
-            }
-            if (savedWaf2) {
-                WAF2_URL = savedWaf2;
-                document.getElementById('waf2-url').value = savedWaf2;
-            }
-            if (savedInterval) {
-                REFRESH_INTERVAL = parseInt(savedInterval);
-                document.getElementById('refresh-interval').value = savedInterval;
-            }
-
-            // 监听配置变化
-            document.getElementById('waf1-url').addEventListener('change', saveConfig);
-            document.getElementById('waf2-url').addEventListener('change', saveConfig);
-            document.getElementById('refresh-interval').addEventListener('change', saveConfig);
+            if (savedWaf1) WAF1_URL = savedWaf1;
+            if (savedWaf2) WAF2_URL = savedWaf2;
+            if (savedInterval) REFRESH_INTERVAL = parseInt(savedInterval);
         }
 
         function saveConfig() {
-            WAF1_URL = document.getElementById('waf1-url').value;
-            WAF2_URL = document.getElementById('waf2-url').value;
-            REFRESH_INTERVAL = parseInt(document.getElementById('refresh-interval').value);
-
             localStorage.setItem('waf1_url', WAF1_URL);
             localStorage.setItem('waf2_url', WAF2_URL);
             localStorage.setItem('refresh_interval', REFRESH_INTERVAL.toString());
-
             startAutoRefresh();
         }
 
@@ -2902,27 +2884,10 @@ REST_BASE_URL=<span class="string">http://localhost:8081</span></code>
             }, 5000);
         }
 
-        // 更新配置面板中的统计数据
+        // 更新配置面板中的统计数据 (可选元素，安全访问)
         function updateConfigPanelStats() {
-            if (waf1Data) {
-                document.getElementById('cfg-waf1-total').textContent = waf1Data.summary?.total || 0;
-                document.getElementById('cfg-waf1-blocked').textContent = waf1Data.summary?.blocked || 0;
-                document.getElementById('cfg-waf1-passed').textContent = waf1Data.summary?.passed || 0;
-            }
-
-            if (waf2Data) {
-                document.getElementById('cfg-waf2-total').textContent = waf2Data.summary?.total || 0;
-                document.getElementById('cfg-waf2-blocked').textContent = waf2Data.summary?.blocked || 0;
-                document.getElementById('cfg-waf2-llm').textContent = waf2Data.cache?.llm_calls || 0;
-                document.getElementById('cfg-waf2-cache').textContent = waf2Data.cache?.hit_rate || '0%';
-
-                // 更新 WAF2 状态徽章
-                const waf2Badge = document.getElementById('waf2-status-badge');
-                if (waf2Badge) {
-                    waf2Badge.textContent = '运行中';
-                    waf2Badge.className = 'accordion-status active';
-                }
-            }
+            // 这些元素已被移除，此函数保留为空以避免调用错误
+            // 统计数据现在显示在总览面板中
         }
 
         // ==================== MCP Server 管理 (Inspector 风格) ====================

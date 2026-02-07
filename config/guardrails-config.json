@@ -1,0 +1,32 @@
+{
+  "mode": "full",
+  "waf1": {
+    "enabled": true,
+    "rules": {
+      "sqlInjection": true,
+      "commandInjection": true,
+      "xss": true,
+      "pathTraversal": true,
+      "sensitiveFiles": true
+    }
+  },
+  "waf2": {
+    "enabled": true,
+    "upstream": "http://juice-shop:3000",
+    "llm": {
+      "provider": "qwen",
+      "model": "qwen-turbo",
+      "apiKey": "",
+      "timeout": 30000
+    },
+    "features": {
+      "requestAnalysis": true,
+      "responseAnalysis": true,
+      "cache": true
+    }
+  },
+  "mcpHub": {
+    "port": 4000,
+    "url": "http://localhost:4000"
+  }
+}
