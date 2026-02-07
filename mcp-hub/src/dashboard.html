@@ -1952,11 +1952,11 @@
 
                         <div class="config-row-inline">
                             <div class="config-field">
-                                <label>目标应用地址</label>
-                                <input type="text" id="cfg-target-url" value="http://localhost:3000" placeholder="http://localhost:3000">
+                                <label>目标应用 URL <span class="hint">(外网/内网均可)</span></label>
+                                <input type="text" id="cfg-target-url" value="" placeholder="http://example.com 或 http://192.168.1.100:8080">
                             </div>
                             <div class="config-field">
-                                <label>WAF2 代理地址</label>
+                                <label>WAF2 代理地址 <span class="hint">(流量入口)</span></label>
                                 <input type="text" id="cfg-waf2-url" value="http://localhost:8081" readonly>
                             </div>
                         </div>
@@ -1993,8 +1993,8 @@
                         </div>
 
                         <div class="config-field">
-                            <label>目标应用地址 <span class="hint">(WAF2 转发的上游地址)</span></label>
-                            <input type="text" id="cfg-target-url-lite" value="http://localhost:3000" placeholder="http://localhost:3000">
+                            <label>目标应用 URL <span class="hint">(外网/内网均可)</span></label>
+                            <input type="text" id="cfg-target-url-lite" value="" placeholder="http://example.com 或 http://192.168.1.100:8080">
                         </div>
 
                         <div class="config-field">
@@ -2574,7 +2574,7 @@ REST_BASE_URL=<span class="string">http://localhost:8081</span></code>
             el.classList.toggle('active');
         }
 
-        // 应用配置 (调用后端 API)
+        // 应用配置 (调用后端 API，同步到 WAF2)
         async function applyConfig() {
             let targetUrl, apiKey;
 
@@ -2586,19 +2586,32 @@ REST_BASE_URL=<span class="string">http://localhost:8081</span></code>
                 apiKey = document.getElementById('cfg-apikey-lite').value;
             }
 
-            // 调用后端 API 保存配置
+            // 验证 URL 格式
+            if (targetUrl && !targetUrl.match(/^https?:\/\/.+/)) {
+                showConfigStatus('config-status', 'error', '目标 URL 格式无效，请输入完整 URL (如 http://example.com)');
+                return;
+            }
+
+            showConfigStatus('config-status', 'info', '正在保存配置...');
+
+            // 调用后端 API 保存配置并同步到 WAF2
             try {
                 const resp = await fetch(`${WAF1_URL}/api/config/waf2`, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({
-                        upstream: targetUrl,
+                        upstream: targetUrl || undefined,
                         llm: apiKey ? { apiKey } : undefined
                     })
                 });
                 const data = await resp.json();
                 if (data.success) {
-                    showConfigStatus('config-status', 'success', '配置已保存到服务器');
+                    // 检查 WAF2 同步状态
+                    if (data.synced) {
+                        showConfigStatus('config-status', 'success', '配置已保存，WAF2 已同步生效');
+                    } else {
+                        showConfigStatus('config-status', 'warning', '配置已保存，但 WAF2 同步失败 (重启容器后生效)');
+                    }
                 } else {
                     showConfigStatus('config-status', 'error', data.error || '保存失败');
                 }
@@ -2606,7 +2619,7 @@ REST_BASE_URL=<span class="string">http://localhost:8081</span></code>
                 // 后端不可用时保存到本地
                 localStorage.setItem('target_url', targetUrl);
                 if (apiKey) localStorage.setItem('llm_apikey', apiKey);
-                showConfigStatus('config-status', 'warning', '配置已保存到本地 (服务器不可用)');
+                showConfigStatus('config-status', 'warning', '配置已保存到本地 (MCP Hub 不可用)');
             }
         }
 

@@ -86,6 +86,39 @@ function saveGuardrailsConfig(config) {
   }
 }
 
+// WAF2 地址 (Docker 网络中)
+const WAF2_URL = process.env.WAF2_URL || 'http://waf2:8081';
+
+// 同步配置到 WAF2
+async function syncToWaf2(waf2Config) {
+  try {
+    const response = await fetch(`${WAF2_URL}/waf2/config`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        enabled: waf2Config.enabled,
+        upstream: waf2Config.upstream,
+        api_key: waf2Config.llm?.apiKey,
+        model: waf2Config.llm?.model,
+        request_analysis: waf2Config.features?.requestAnalysis,
+        response_analysis: waf2Config.features?.responseAnalysis,
+        cache_enabled: waf2Config.features?.cache
+      })
+    });
+
+    if (response.ok) {
+      console.log('[Config] WAF2 配置已同步');
+      return true;
+    } else {
+      console.error('[Config] WAF2 同步失败:', response.status);
+      return false;
+    }
+  } catch (e) {
+    console.error('[Config] WAF2 同步失败:', e.message);
+    return false;
+  }
+}
+
 // 当前配置
 let guardrailsConfig = loadGuardrailsConfig();
 
@@ -178,7 +211,7 @@ app.post("/api/config/waf1", (req, res) => {
 });
 
 // 更新 WAF2 配置
-app.post("/api/config/waf2", (req, res) => {
+app.post("/api/config/waf2", async (req, res) => {
   const { enabled, upstream, llm, features } = req.body;
 
   if (typeof enabled === 'boolean') {
@@ -200,8 +233,12 @@ app.post("/api/config/waf2", (req, res) => {
 
   saveGuardrailsConfig(guardrailsConfig);
 
+  // 同步到 WAF2 容器
+  const synced = await syncToWaf2(guardrailsConfig.waf2);
+
   res.json({
     success: true,
+    synced,
     waf2: {
       ...guardrailsConfig.waf2,
       llm: {
@@ -213,7 +250,7 @@ app.post("/api/config/waf2", (req, res) => {
 });
 
 // 完整配置更新
-app.post("/api/config", (req, res) => {
+app.post("/api/config", async (req, res) => {
   const { mode, waf1, waf2 } = req.body;
 
   if (mode && ['full', 'lite'].includes(mode)) {
@@ -237,8 +274,12 @@ app.post("/api/config", (req, res) => {
   saveGuardrailsConfig(guardrailsConfig);
   applyWaf1Config();
 
+  // 同步到 WAF2 容器
+  const synced = await syncToWaf2(guardrailsConfig.waf2);
+
   res.json({
     success: true,
+    synced,
     config: {
       ...guardrailsConfig,
       waf2: {
