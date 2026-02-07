@@ -23,7 +23,7 @@
     "llm": {
       "provider": "qwen",
       "model": "qwen-turbo",
-      "apiKey": "${QWEN_API_KEY}",
+      "apiKey": "${QWEN_API_KEY}"
     }
   }
 }

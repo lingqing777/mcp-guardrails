@@ -1,6 +1,9 @@
 """
 MCP Guardrails 对比演示
 展示 WAF1 + WAF2 双层防护效果
+
+注意: 此脚本用于演示目的，需要先启动 MCP Hub 和 WAF2
+使用方法: python test_guardrails.py
 """
 import requests
 import json
@@ -8,10 +11,11 @@ import json
 MCP_HUB = "http://localhost:4000"
 
 def call_mcp(desc, method, endpoint, body=None):
-    """通过 MCP Hub 调用工具"""
+    """通过 MCP Hub 调用工具 (直接测试 WAF)"""
+    # 使用 /api/tools/call 端点
     payload = {
-        "server_name": "rest-api",
-        "tool": "test_request",
+        "server_name": "juice-shop",  # 使用 docker-compose 中定义的服务
+        "tool": "http_request",       # 假设有 HTTP 请求工具
         "arguments": {
             "method": method,
             "endpoint": endpoint
@@ -21,7 +25,7 @@ def call_mcp(desc, method, endpoint, body=None):
         payload["arguments"]["body"] = body
 
     try:
-        resp = requests.post(f"{MCP_HUB}/api/servers/tools", json=payload, timeout=30)
+        resp = requests.post(f"{MCP_HUB}/api/tools/call", json=payload, timeout=30)
 
         if resp.status_code == 403:
             result = resp.json()

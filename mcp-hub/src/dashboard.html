@@ -2742,7 +2742,6 @@ REST_BASE_URL=<span class="string">http://localhost:8081</span></code>
 
         // 测试 WAF1 连接
         async function testWaf1Connection() {
-            const statusEl = document.getElementById('waf1-config-status');
             showConfigStatus('waf1-config-status', 'info', '正在测试 WAF1 连接...');
 
             try {
@@ -2751,11 +2750,6 @@ REST_BASE_URL=<span class="string">http://localhost:8081</span></code>
                     const data = await response.json();
                     showConfigStatus('waf1-config-status', 'success',
                         `WAF1 连接成功! 总请求: ${data.total || 0}, 拦截: ${data.blocked || 0}`);
-
-                    // 更新配置面板中的统计
-                    document.getElementById('cfg-waf1-total').textContent = data.total || 0;
-                    document.getElementById('cfg-waf1-blocked').textContent = data.blocked || 0;
-                    document.getElementById('cfg-waf1-passed').textContent = data.passed || 0;
                 } else {
                     throw new Error(`HTTP ${response.status}`);
                 }
@@ -2774,12 +2768,6 @@ REST_BASE_URL=<span class="string">http://localhost:8081</span></code>
                     const data = await response.json();
                     showConfigStatus('waf2-config-status', 'success',
                         `WAF2 连接成功! LLM调用: ${data.llm_calls || 0}, 缓存命中: ${data.cache_hit_rate || '0%'}`);
-
-                    // 更新配置面板中的统计
-                    document.getElementById('cfg-waf2-total').textContent = data.total || 0;
-                    document.getElementById('cfg-waf2-blocked').textContent = data.blocked || 0;
-                    document.getElementById('cfg-waf2-llm').textContent = data.llm_calls || 0;
-                    document.getElementById('cfg-waf2-cache').textContent = data.cache_hit_rate || '0%';
                 } else {
                     throw new Error(`HTTP ${response.status}`);
                 }
@@ -2864,24 +2852,6 @@ REST_BASE_URL=<span class="string">http://localhost:8081</span></code>
             URL.revokeObjectURL(url);
 
             showConfigStatus('data-mgmt-status', 'success', '日志已导出');
-        }
-
-        // 显示配置状态消息
-        function showConfigStatus(containerId, type, message) {
-            const container = document.getElementById(containerId);
-            if (!container) return;
-
-            container.innerHTML = `
-                <div class="status-message ${type}">
-                    <span>${type === 'success' ? '✓' : type === 'error' ? '✗' : type === 'warning' ? '⚠' : 'ℹ'}</span>
-                    <span>${message}</span>
-                </div>
-            `;
-
-            // 自动清除
-            setTimeout(() => {
-                container.innerHTML = '';
-            }, 5000);
         }
 
         // 更新配置面板中的统计数据 (可选元素，安全访问)
