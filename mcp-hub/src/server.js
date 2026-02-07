@@ -87,17 +87,37 @@ const app = express();
 app.use(cors());
 app.use(express.json());
 
-// Dashboard 主页 (支持 Docker 和本地开发)
-app.get('/', (req, res) => {
-  // Docker 环境使用 /app/src/dashboard.html
-  // 本地开发使用相对路径
-  const dockerPath = '/app/src/dashboard.html';
-  const localPath = path.join(__dirname, 'dashboard.html');
+// Dashboard 静态文件服务 (支持 Docker 和本地开发)
+// Docker: /app/src/dashboard/
+// Local: ./dashboard/
+const dockerDashboardPath = '/app/src/dashboard';
+const localDashboardPath = path.join(__dirname, 'dashboard');
 
-  // 优先尝试 Docker 路径，失败则使用本地路径
-  res.sendFile(dockerPath, (err) => {
+// 静态文件中间件 (CSS, JS)
+app.use('/dashboard', express.static(dockerDashboardPath, { fallthrough: true }));
+app.use('/dashboard', express.static(localDashboardPath));
+
+// Dashboard 主页
+app.get('/', (req, res) => {
+  // 优先尝试新的模块化 dashboard
+  const dockerIndexPath = path.join(dockerDashboardPath, 'index.html');
+  const localIndexPath = path.join(localDashboardPath, 'index.html');
+  // 兼容旧的单文件 dashboard
+  const dockerLegacyPath = '/app/src/dashboard.html';
+  const localLegacyPath = path.join(__dirname, 'dashboard.html');
+
+  res.sendFile(dockerIndexPath, (err) => {
     if (err) {
-      res.sendFile(localPath);
+      res.sendFile(localIndexPath, (err2) => {
+        if (err2) {
+          // 回退到旧版单文件 dashboard
+          res.sendFile(dockerLegacyPath, (err3) => {
+            if (err3) {
+              res.sendFile(localLegacyPath);
+            }
+          });
+        }
+      });
     }
   });
 });

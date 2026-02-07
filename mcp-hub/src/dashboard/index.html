@@ -1,0 +1,537 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>MCP Guardrails - 统一安全仪表盘</title>
+    <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+    <div class="header">
+        <h1>MCP Guardrails Security Dashboard</h1>
+        <div class="status">
+            <div class="status-item">
+                <span class="status-dot" id="waf1-status"></span>
+                <span>WAF1 (MCP Layer)</span>
+            </div>
+            <div class="status-item">
+                <span class="status-dot" id="waf2-status"></span>
+                <span>WAF2 (HTTP Layer)</span>
+            </div>
+        </div>
+    </div>
+
+    <div class="container">
+        <div class="tabs">
+            <div class="tab active" data-tab="overview">总览</div>
+            <div class="tab" data-tab="servers">MCP Servers</div>
+            <div class="tab" data-tab="waf1">WAF1 详情</div>
+            <div class="tab" data-tab="waf2">WAF2 详情</div>
+            <div class="tab" data-tab="detections">检测记录</div>
+            <div class="tab" data-tab="config">配置</div>
+        </div>
+
+        <!-- 总览面板 -->
+        <div id="overview-panel" class="tab-content">
+            <div class="section">
+                <div class="section-title">实时统计</div>
+                <div class="grid">
+                    <div class="card">
+                        <div class="card-title">总请求数</div>
+                        <div class="card-value blue" id="total-requests">-</div>
+                        <div class="card-subtitle">WAF1 + WAF2</div>
+                    </div>
+                    <div class="card">
+                        <div class="card-title">已拦截</div>
+                        <div class="card-value red" id="total-blocked">-</div>
+                        <div class="card-subtitle">检测到的威胁</div>
+                    </div>
+                    <div class="card">
+                        <div class="card-title">已放行</div>
+                        <div class="card-value green" id="total-passed">-</div>
+                        <div class="card-subtitle">安全请求</div>
+                    </div>
+                    <div class="card">
+                        <div class="card-title">拦截率</div>
+                        <div class="card-value yellow" id="block-rate">-</div>
+                        <div class="card-subtitle">威胁检测率</div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="section">
+                <div class="section-title">WAF 分层统计</div>
+                <div class="grid">
+                    <div class="card">
+                        <div class="card-title">WAF1 - MCP 协议层</div>
+                        <div class="card-value purple" id="waf1-blocked">-</div>
+                        <div class="card-subtitle" id="waf1-detail">静态规则检测</div>
+                    </div>
+                    <div class="card">
+                        <div class="card-title">WAF2 - HTTP 流量层</div>
+                        <div class="card-value purple" id="waf2-blocked">-</div>
+                        <div class="card-subtitle" id="waf2-detail">LLM 动态检测</div>
+                    </div>
+                    <div class="card">
+                        <div class="card-title">WAF2 缓存命中率</div>
+                        <div class="card-value green" id="cache-hit-rate">-</div>
+                        <div class="card-subtitle" id="cache-detail">LLM 调用优化</div>
+                    </div>
+                    <div class="card">
+                        <div class="card-title">平均延迟</div>
+                        <div class="card-value blue" id="avg-latency">-</div>
+                        <div class="card-subtitle">WAF2 处理时间</div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="two-cols">
+                <div class="panel">
+                    <div class="panel-title">按攻击类型分布</div>
+                    <div class="bar-chart" id="category-chart">
+                        <div class="empty-state">暂无数据</div>
+                    </div>
+                </div>
+                <div class="panel">
+                    <div class="panel-title">按严重等级分布</div>
+                    <div class="bar-chart" id="severity-chart">
+                        <div class="empty-state">暂无数据</div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- MCP Servers 管理面板 (参考 MCP Inspector 设计) -->
+        <div id="servers-panel" class="tab-content" style="display: none;">
+            <!-- 左侧：Server 列表 -->
+            <div class="inspector-layout">
+                <div class="inspector-sidebar">
+                    <div class="sidebar-header">
+                        <span>MCP Servers</span>
+                        <button class="icon-btn" onclick="fetchMcpServers()" title="刷新">&#8635;</button>
+                    </div>
+                    <div class="server-list" id="servers-list">
+                        <div class="empty-state">正在加载...</div>
+                    </div>
+                </div>
+
+                <!-- 右侧：Server 详情 -->
+                <div class="inspector-main">
+                    <div id="server-detail-empty" class="empty-state" style="padding: 60px;">
+                        选择一个 MCP Server 查看详情
+                    </div>
+
+                    <div id="server-detail" style="display: none;">
+                        <!-- Server 信息头 -->
+                        <div class="server-header">
+                            <div class="server-title">
+                                <span id="detail-server-name">-</span>
+                                <span class="server-status" id="detail-server-status">-</span>
+                            </div>
+                            <div class="server-meta">
+                                <span>版本: <span id="detail-version">-</span></span>
+                                <span>运行时间: <span id="detail-uptime">-</span></span>
+                                <span>传输: <span id="detail-transport">-</span></span>
+                            </div>
+                        </div>
+
+                        <!-- Inspector 风格的子标签 -->
+                        <div class="inspector-tabs">
+                            <div class="inspector-tab active" data-stab="tools">Tools</div>
+                            <div class="inspector-tab" data-stab="resources">Resources</div>
+                            <div class="inspector-tab" data-stab="prompts">Prompts</div>
+                        </div>
+
+                        <!-- Tools 面板 -->
+                        <div id="stab-tools" class="inspector-tab-content">
+                            <div class="tools-grid" id="tools-list">
+                                <div class="empty-state">暂无工具</div>
+                            </div>
+                        </div>
+
+                        <!-- Resources 面板 -->
+                        <div id="stab-resources" class="inspector-tab-content" style="display: none;">
+                            <div class="resources-list" id="resources-list">
+                                <div class="empty-state">暂无资源</div>
+                            </div>
+                        </div>
+
+                        <!-- Prompts 面板 -->
+                        <div id="stab-prompts" class="inspector-tab-content" style="display: none;">
+                            <div class="prompts-list" id="prompts-list">
+                                <div class="empty-state">暂无提示词模板</div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- 工具测试面板 -->
+            <div id="tool-test-panel" class="tool-test-panel" style="display: none;">
+                <div class="test-panel-header">
+                    <span>测试工具: <strong id="test-tool-name">-</strong></span>
+                    <button class="icon-btn" onclick="closeToolTest()">✕</button>
+                </div>
+                <div class="test-panel-body">
+                    <div class="test-form" id="test-form">
+                        <!-- 动态生成参数表单 -->
+                    </div>
+                    <button class="refresh-btn" onclick="executeToolTest()">执行</button>
+                </div>
+                <div class="test-result" id="test-result">
+                    <div class="result-label">响应结果</div>
+                    <pre id="test-output">等待执行...</pre>
+                </div>
+            </div>
+        </div>
+
+        <!-- WAF1 详情面板 -->
+        <div id="waf1-panel" class="tab-content" style="display: none;">
+            <div class="section">
+                <div class="section-title">WAF1 统计</div>
+                <div class="grid">
+                    <div class="card">
+                        <div class="card-title">总请求</div>
+                        <div class="card-value blue" id="waf1-total">-</div>
+                    </div>
+                    <div class="card">
+                        <div class="card-title">已拦截</div>
+                        <div class="card-value red" id="waf1-blocked-detail">-</div>
+                    </div>
+                    <div class="card">
+                        <div class="card-title">已放行</div>
+                        <div class="card-value green" id="waf1-passed">-</div>
+                    </div>
+                    <div class="card">
+                        <div class="card-title">限流触发</div>
+                        <div class="card-value yellow" id="waf1-ratelimit">-</div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="two-cols">
+                <div class="panel">
+                    <div class="panel-title">WAF1 攻击类型</div>
+                    <div class="bar-chart" id="waf1-category-chart">
+                        <div class="empty-state">暂无数据</div>
+                    </div>
+                </div>
+                <div class="panel">
+                    <div class="panel-title">WAF1 检测记录</div>
+                    <div class="detection-list" id="waf1-detections">
+                        <div class="empty-state">暂无检测记录</div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- WAF2 详情面板 -->
+        <div id="waf2-panel" class="tab-content" style="display: none;">
+            <div class="section">
+                <div class="section-title">WAF2 统计</div>
+                <div class="grid">
+                    <div class="card">
+                        <div class="card-title">总请求</div>
+                        <div class="card-value blue" id="waf2-total">-</div>
+                    </div>
+                    <div class="card">
+                        <div class="card-title">请求拦截</div>
+                        <div class="card-value red" id="waf2-blocked-req">-</div>
+                    </div>
+                    <div class="card">
+                        <div class="card-title">响应拦截</div>
+                        <div class="card-value red" id="waf2-blocked-resp">-</div>
+                    </div>
+                    <div class="card">
+                        <div class="card-title">LLM 调用</div>
+                        <div class="card-value purple" id="waf2-llm-calls">-</div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="two-cols">
+                <div class="panel">
+                    <div class="panel-title">WAF2 攻击类型</div>
+                    <div class="bar-chart" id="waf2-category-chart">
+                        <div class="empty-state">暂无数据</div>
+                    </div>
+                </div>
+                <div class="panel">
+                    <div class="panel-title">WAF2 检测记录</div>
+                    <div class="detection-list" id="waf2-detections">
+                        <div class="empty-state">暂无检测记录</div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- 检测记录面板 -->
+        <div id="detections-panel" class="tab-content" style="display: none;">
+            <div class="section">
+                <div class="section-title">全部检测记录</div>
+                <div class="detection-list" id="all-detections">
+                    <div class="empty-state">暂无检测记录</div>
+                </div>
+            </div>
+        </div>
+
+        <!-- 配置面板 -->
+        <div id="config-panel" class="tab-content" style="display: none;">
+
+            <!-- 防护模式选择 -->
+            <div class="config-section">
+                <div class="config-section-header">
+                    <div class="config-section-title">
+                        <span>🔒</span> 防护模式
+                    </div>
+                </div>
+                <div class="config-section-body">
+                    <div class="mode-selector">
+                        <!-- 完整防护模式 -->
+                        <div class="mode-card selected" data-mode="full" onclick="selectMode('full')">
+                            <div class="mode-card-radio"></div>
+                            <div class="mode-card-title">
+                                🛡️ 完整防护
+                            </div>
+                            <div class="mode-card-subtitle">Agent → MCP Hub → 你的 MCP Server → WAF2 → 目标应用</div>
+                            <div class="mode-card-features">
+                                <div class="mode-feature yes">✓ MCP 协议层防护 (WAF1)</div>
+                                <div class="mode-feature yes">✓ HTTP 流量层防护 (WAF2)</div>
+                                <div class="mode-feature yes">✓ 完整攻击日志与分析</div>
+                            </div>
+                            <div class="mode-card-hint">适合：企业级安全需求、生产环境</div>
+                        </div>
+
+                        <!-- 轻量防护模式 -->
+                        <div class="mode-card" data-mode="lite" onclick="selectMode('lite')">
+                            <div class="mode-card-radio"></div>
+                            <div class="mode-card-title">
+                                ⚡ 轻量防护
+                            </div>
+                            <div class="mode-card-subtitle">你的 MCP Server → WAF2 → 目标应用 (保留原有 Agent 配置)</div>
+                            <div class="mode-card-features">
+                                <div class="mode-feature no">✗ 无 MCP 协议层防护</div>
+                                <div class="mode-feature yes">✓ HTTP 流量层防护 (WAF2)</div>
+                                <div class="mode-feature yes">✓ 无需修改 Agent 配置</div>
+                            </div>
+                            <div class="mode-card-hint">适合：快速体验、个人使用、低迁移成本</div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- 快速配置 - 完整模式 -->
+            <div class="config-section" id="config-full" style="display: block;">
+                <div class="config-section-header">
+                    <div class="config-section-title">
+                        <span>⚙️</span> 快速配置 - 完整防护
+                    </div>
+                    <div class="config-section-actions">
+                        <button class="btn btn-primary" onclick="applyConfig()">应用配置</button>
+                    </div>
+                </div>
+                <div class="config-section-body">
+                    <div class="config-group">
+                        <div class="config-field">
+                            <label>MCP Hub 地址 <span class="hint">(Cursor 连接此地址)</span></label>
+                            <div class="input-with-copy">
+                                <input type="text" id="cfg-mcphub-url" value="http://localhost:4000" readonly>
+                                <button class="copy-btn" onclick="copyToClipboard('cfg-mcphub-url', this)">复制</button>
+                            </div>
+                        </div>
+
+                        <div class="config-row-inline">
+                            <div class="config-field">
+                                <label>目标应用 URL <span class="hint">(外网/内网均可)</span></label>
+                                <input type="text" id="cfg-target-url" value="" placeholder="http://example.com 或 http://192.168.1.100:8080">
+                            </div>
+                            <div class="config-field">
+                                <label>WAF2 代理地址 <span class="hint">(流量入口)</span></label>
+                                <input type="text" id="cfg-waf2-url" value="http://localhost:8081" readonly>
+                            </div>
+                        </div>
+
+                        <div class="config-field">
+                            <label>LLM API Key <span class="hint">(Qwen DashScope)</span></label>
+                            <div class="input-with-copy">
+                                <input type="password" id="cfg-apikey" placeholder="sk-xxxx...">
+                                <button class="copy-btn" onclick="togglePasswordVisibility('cfg-apikey', this)" style="min-width: 60px;">显示</button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- 快速配置 - 轻量模式 -->
+            <div class="config-section" id="config-lite" style="display: none;">
+                <div class="config-section-header">
+                    <div class="config-section-title">
+                        <span>⚙️</span> 快速配置 - 轻量防护
+                    </div>
+                    <div class="config-section-actions">
+                        <button class="btn btn-primary" onclick="applyConfig()">应用配置</button>
+                    </div>
+                </div>
+                <div class="config-section-body">
+                    <div class="config-group">
+                        <div class="config-field">
+                            <label>WAF2 代理地址 <span class="hint">(复制到你的 MCP Server 配置)</span></label>
+                            <div class="input-with-copy">
+                                <input type="text" id="cfg-waf2-proxy" value="http://localhost:8081" readonly>
+                                <button class="copy-btn" onclick="copyToClipboard('cfg-waf2-proxy', this)">复制</button>
+                            </div>
+                        </div>
+
+                        <div class="config-field">
+                            <label>目标应用 URL <span class="hint">(外网/内网均可)</span></label>
+                            <input type="text" id="cfg-target-url-lite" value="" placeholder="http://example.com 或 http://192.168.1.100:8080">
+                        </div>
+
+                        <div class="config-field">
+                            <label>LLM API Key <span class="hint">(Qwen DashScope)</span></label>
+                            <div class="input-with-copy">
+                                <input type="password" id="cfg-apikey-lite" placeholder="sk-xxxx...">
+                                <button class="copy-btn" onclick="togglePasswordVisibility('cfg-apikey-lite', this)" style="min-width: 60px;">显示</button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- 配置指引 -->
+            <div class="config-section">
+                <div class="config-section-header" onclick="toggleAccordion('config-guide')" style="cursor: pointer;">
+                    <div class="config-section-title">
+                        <span>📋</span> 配置指引
+                    </div>
+                    <span class="accordion-chevron" id="config-guide-chevron">▼</span>
+                </div>
+                <div class="accordion-content" id="config-guide-content">
+                    <div class="config-section-body">
+                        <!-- 完整模式指引 -->
+                        <div id="guide-full">
+                            <p style="color: #aaa; margin-bottom: 16px;"><strong>步骤 1:</strong> 修改你的 Cursor/Agent MCP 配置，连接到 MCP Hub：</p>
+                            <div class="code-block">
+                                <button class="code-block-copy" onclick="copyCodeBlock(this)">复制</button>
+<code><span class="comment">// ~/.cursor/mcp.json</span>
+{
+  <span class="key">"mcpServers"</span>: {
+    <span class="key">"guardrails"</span>: {
+      <span class="key">"url"</span>: <span class="string">"http://localhost:4000"</span>
+    }
+  }
+}</code>
+                            </div>
+                            <p style="color: #aaa; margin: 16px 0;"><strong>步骤 2:</strong> 在 config/mcp-servers.json 中配置你自己的 MCP Server</p>
+                            <p style="color: #aaa; margin-bottom: 16px;"><strong>步骤 3:</strong> 你的 MCP Server 需配置 HTTP 代理指向 WAF2：</p>
+                            <div class="code-block">
+                                <button class="code-block-copy" onclick="copyCodeBlock(this)">复制</button>
+<code><span class="comment"># 在你的 MCP Server 环境变量中配置</span>
+REST_BASE_URL=<span class="string">http://localhost:8081</span></code>
+                            </div>
+                        </div>
+
+                        <!-- 轻量模式指引 -->
+                        <div id="guide-lite" style="display: none;">
+                            <p style="color: #aaa; margin-bottom: 16px;">只需一步：将 MCP Server 的 REST_BASE_URL 改为 WAF2 地址</p>
+                            <div class="code-block">
+                                <button class="code-block-copy" onclick="copyCodeBlock(this)">复制</button>
+<code><span class="comment"># 原配置</span>
+REST_BASE_URL=http://localhost:3000
+
+<span class="comment"># 改为 ↓</span>
+REST_BASE_URL=<span class="string">http://localhost:8081</span></code>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- WAF 规则开关 -->
+            <div class="config-section">
+                <div class="config-section-header">
+                    <div class="config-section-title">
+                        <span>🛡️</span> WAF 规则开关
+                    </div>
+                </div>
+                <div class="config-section-body">
+                    <div class="waf-rules-grid">
+                        <!-- WAF1 规则 -->
+                        <div class="waf-rules-column" id="waf1-rules-column">
+                            <div class="waf-rules-column-title">
+                                <span style="color: #667eea;">●</span> WAF1 静态检测
+                                <span style="font-size: 11px; color: #666; font-weight: normal;">(完整模式)</span>
+                            </div>
+                            <div class="waf-rule-row">
+                                <span class="waf-rule-name">SQL 注入</span>
+                                <div class="toggle-sm active" data-rule="sql" onclick="toggleRuleSm(this)"></div>
+                            </div>
+                            <div class="waf-rule-row">
+                                <span class="waf-rule-name">命令注入</span>
+                                <div class="toggle-sm active" data-rule="cmd" onclick="toggleRuleSm(this)"></div>
+                            </div>
+                            <div class="waf-rule-row">
+                                <span class="waf-rule-name">XSS</span>
+                                <div class="toggle-sm active" data-rule="xss" onclick="toggleRuleSm(this)"></div>
+                            </div>
+                            <div class="waf-rule-row">
+                                <span class="waf-rule-name">路径遍历</span>
+                                <div class="toggle-sm active" data-rule="path" onclick="toggleRuleSm(this)"></div>
+                            </div>
+                            <div class="waf-rule-row">
+                                <span class="waf-rule-name">敏感文件</span>
+                                <div class="toggle-sm active" data-rule="sensitive" onclick="toggleRuleSm(this)"></div>
+                            </div>
+                        </div>
+
+                        <!-- WAF2 规则 -->
+                        <div class="waf-rules-column">
+                            <div class="waf-rules-column-title">
+                                <span style="color: #f5576c;">●</span> WAF2 LLM 检测
+                            </div>
+                            <div class="waf-rule-row">
+                                <span class="waf-rule-name">请求分析</span>
+                                <div class="toggle-sm active" data-rule="req" onclick="toggleRuleSm(this)"></div>
+                            </div>
+                            <div class="waf-rule-row">
+                                <span class="waf-rule-name">响应检测</span>
+                                <div class="toggle-sm active" data-rule="res" onclick="toggleRuleSm(this)"></div>
+                            </div>
+                            <div class="waf-rule-row">
+                                <span class="waf-rule-name">结果缓存</span>
+                                <div class="toggle-sm active" data-rule="cache" onclick="toggleRuleSm(this)"></div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- 数据管理 -->
+            <div class="config-section">
+                <div class="config-section-header">
+                    <div class="config-section-title">
+                        <span>📊</span> 数据管理
+                    </div>
+                </div>
+                <div class="config-section-body">
+                    <div class="action-group" style="margin-top: 0; padding-top: 0; border-top: none;">
+                        <button class="btn btn-primary" onclick="refreshData()">
+                            <span>🔄</span> 刷新数据
+                        </button>
+                        <button class="btn btn-secondary" onclick="exportLogs()">
+                            <span>📥</span> 导出日志
+                        </button>
+                        <button class="btn btn-danger" onclick="resetAllStats()">
+                            <span>⚠️</span> 重置统计
+                        </button>
+                    </div>
+                    <div id="config-status"></div>
+                </div>
+            </div>
+
+        </div>
+    </div>
+
+    <script src="app.js"></script>
+</body>
+</html>
