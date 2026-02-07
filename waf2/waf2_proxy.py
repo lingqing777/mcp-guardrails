@@ -1,13 +1,23 @@
 """
-WAF2 - MCP Guardrails 动态防火墙
+WAF2 - MCP Guardrails HTTP 代理防火墙
 HTTP 流量层 LLM 动态检测
 
+架构说明:
+  - WAF2 是一个 HTTP 反向代理，不是 MCP Server
+  - 用户的 MCP Server 配置 REST_BASE_URL=http://waf2:8081 后，
+    其发出的 HTTP 请求会经过 WAF2 代理
+  - WAF2 对请求和响应进行 LLM 动态检测，然后转发到目标应用
+
+数据流:
+  用户的 MCP Server → WAF2 (本服务) → 目标 Web 应用
+                      ↑ LLM 检测
+
 功能:
-1. 请求检测 - LLM 分析入站请求
-2. 响应检测 - 检测响应中的敏感数据泄露
+1. 请求检测 - LLM 分析来自 MCP Server 的 HTTP 请求
+2. 响应检测 - 检测目标应用响应中的敏感数据泄露
 3. 缓存机制 - 避免重复调用 LLM
 4. 攻击分类 - OWASP 标准分类
-5. 统计 API - 与 WAF1 统一的仪表盘接口
+5. 统计 API - 与 MCP Hub Dashboard 统一的接口
 
 参考:
 - MCP-Guard 论文 Stage 2/3

@@ -1903,7 +1903,7 @@
                             <div class="mode-card-title">
                                 🛡️ 完整防护
                             </div>
-                            <div class="mode-card-subtitle">MCP Hub + WAF1 + WAF2</div>
+                            <div class="mode-card-subtitle">Agent → MCP Hub → 你的 MCP Server → WAF2 → 目标应用</div>
                             <div class="mode-card-features">
                                 <div class="mode-feature yes">✓ MCP 协议层防护 (WAF1)</div>
                                 <div class="mode-feature yes">✓ HTTP 流量层防护 (WAF2)</div>
@@ -1918,11 +1918,11 @@
                             <div class="mode-card-title">
                                 ⚡ 轻量防护
                             </div>
-                            <div class="mode-card-subtitle">仅 WAF2 代理</div>
+                            <div class="mode-card-subtitle">你的 MCP Server → WAF2 → 目标应用 (保留原有 Agent 配置)</div>
                             <div class="mode-card-features">
                                 <div class="mode-feature no">✗ 无 MCP 协议层防护</div>
                                 <div class="mode-feature yes">✓ HTTP 流量层防护 (WAF2)</div>
-                                <div class="mode-feature yes">✓ 保留原有 MCP 配置</div>
+                                <div class="mode-feature yes">✓ 无需修改 Agent 配置</div>
                             </div>
                             <div class="mode-card-hint">适合：快速体验、个人使用、低迁移成本</div>
                         </div>
@@ -2020,7 +2020,7 @@
                     <div class="config-section-body">
                         <!-- 完整模式指引 -->
                         <div id="guide-full">
-                            <p style="color: #aaa; margin-bottom: 16px;">修改你的 Cursor MCP 配置，连接到 MCP Hub：</p>
+                            <p style="color: #aaa; margin-bottom: 16px;"><strong>步骤 1:</strong> 修改你的 Cursor/Agent MCP 配置，连接到 MCP Hub：</p>
                             <div class="code-block">
                                 <button class="code-block-copy" onclick="copyCodeBlock(this)">复制</button>
 <code><span class="comment">// ~/.cursor/mcp.json</span>
@@ -2031,6 +2031,13 @@
     }
   }
 }</code>
+                            </div>
+                            <p style="color: #aaa; margin: 16px 0;"><strong>步骤 2:</strong> 在 config/mcp-servers.json 中配置你自己的 MCP Server</p>
+                            <p style="color: #aaa; margin-bottom: 16px;"><strong>步骤 3:</strong> 你的 MCP Server 需配置 HTTP 代理指向 WAF2：</p>
+                            <div class="code-block">
+                                <button class="code-block-copy" onclick="copyCodeBlock(this)">复制</button>
+<code><span class="comment"># 在你的 MCP Server 环境变量中配置</span>
+REST_BASE_URL=<span class="string">http://localhost:8081</span></code>
                             </div>
                         </div>
 
@@ -2569,9 +2576,74 @@ REST_BASE_URL=<span class="string">http://localhost:8081</span></code>
             }
         }
 
-        // 紧凑开关切换
-        function toggleRuleSm(el) {
+        // 紧凑开关切换 (调用后端 API)
+        async function toggleRuleSm(el) {
             el.classList.toggle('active');
+            const isActive = el.classList.contains('active');
+            const rule = el.dataset.rule;
+
+            // 判断是 WAF1 还是 WAF2 规则
+            const isWaf1Rule = ['sql', 'cmd', 'xss', 'path', 'sensitive'].includes(rule);
+            const isWaf2Rule = ['req', 'res', 'cache'].includes(rule);
+
+            if (isWaf1Rule) {
+                // WAF1 规则映射
+                const ruleMap = {
+                    'sql': 'sqlInjection',
+                    'cmd': 'commandInjection',
+                    'xss': 'xss',
+                    'path': 'pathTraversal',
+                    'sensitive': 'sensitiveFiles'
+                };
+                const ruleName = ruleMap[rule];
+
+                try {
+                    const resp = await fetch(`${WAF1_URL}/api/config/waf1`, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({
+                            rules: { [ruleName]: isActive }
+                        })
+                    });
+                    if (resp.ok) {
+                        console.log(`[WAF1] 规则 ${ruleName} 已${isActive ? '启用' : '禁用'}`);
+                    }
+                } catch (e) {
+                    console.error('[WAF1] 规则更新失败:', e);
+                    // 回滚 UI
+                    el.classList.toggle('active');
+                }
+            } else if (isWaf2Rule) {
+                // WAF2 规则映射
+                const featureMap = {
+                    'req': 'requestAnalysis',
+                    'res': 'responseAnalysis',
+                    'cache': 'cache'
+                };
+                const featureName = featureMap[rule];
+
+                try {
+                    const resp = await fetch(`${WAF1_URL}/api/config/waf2`, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({
+                            features: { [featureName]: isActive }
+                        })
+                    });
+                    const data = await resp.json();
+                    if (data.success) {
+                        if (data.synced) {
+                            console.log(`[WAF2] 功能 ${featureName} 已${isActive ? '启用' : '禁用'}`);
+                        } else {
+                            console.warn(`[WAF2] 配置已保存但同步失败: ${data.syncError}`);
+                        }
+                    }
+                } catch (e) {
+                    console.error('[WAF2] 规则更新失败:', e);
+                    // 回滚 UI
+                    el.classList.toggle('active');
+                }
+            }
         }
 
         // 应用配置 (调用后端 API，同步到 WAF2)
@@ -2668,6 +2740,38 @@ REST_BASE_URL=<span class="string">http://localhost:8081</span></code>
                         const targetLite = document.getElementById('cfg-target-url-lite');
                         if (targetFull) targetFull.value = config.waf2.upstream;
                         if (targetLite) targetLite.value = config.waf2.upstream;
+                    }
+
+                    // 加载 WAF1 规则开关状态
+                    if (config.waf1?.rules) {
+                        const waf1RuleMap = {
+                            'sqlInjection': 'sql',
+                            'commandInjection': 'cmd',
+                            'xss': 'xss',
+                            'pathTraversal': 'path',
+                            'sensitiveFiles': 'sensitive'
+                        };
+                        for (const [ruleName, dataRule] of Object.entries(waf1RuleMap)) {
+                            const toggle = document.querySelector(`[data-rule="${dataRule}"]`);
+                            if (toggle && config.waf1.rules[ruleName] !== undefined) {
+                                toggle.classList.toggle('active', config.waf1.rules[ruleName]);
+                            }
+                        }
+                    }
+
+                    // 加载 WAF2 功能开关状态
+                    if (config.waf2?.features) {
+                        const waf2FeatureMap = {
+                            'requestAnalysis': 'req',
+                            'responseAnalysis': 'res',
+                            'cache': 'cache'
+                        };
+                        for (const [featureName, dataRule] of Object.entries(waf2FeatureMap)) {
+                            const toggle = document.querySelector(`[data-rule="${dataRule}"]`);
+                            if (toggle && config.waf2.features[featureName] !== undefined) {
+                                toggle.classList.toggle('active', config.waf2.features[featureName]);
+                            }
+                        }
                     }
 
                     console.log('[Config] 已从服务器加载配置:', config.mode);

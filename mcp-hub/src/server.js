@@ -398,8 +398,9 @@ app.post("/api/waf1/toggle", (req, res) => {
 // 添加 WAF1 中间件 (在 WAF1 API 之后，其他路由之前)
 app.use("/api", waf1Middleware);
 
-// ==================== 简单工具调用 API (供 Agent 使用) ====================
-// 注意: 这个路由在 waf1Middleware 之后，会经过 WAF1 检测
+// ==================== 简单工具调用 API (供 Dashboard 测试使用) ====================
+// 注意: Agent 应通过 MCP 协议连接 MCP Hub，而不是直接调用此 HTTP API
+// 此 API 主要用于 Dashboard 中的工具测试功能
 app.post("/api/tools/call", async (req, res) => {
   const { server_name, tool, arguments: args } = req.body;
 

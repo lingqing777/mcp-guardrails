@@ -1,41 +1,21 @@
 {
+  "_comment": "用户 MCP Server 配置文件 - 在此配置你自己的 MCP Server",
+  "_usage": "MCP Hub 会连接这些 Server，Agent 通过 MCP Hub 访问它们",
+  "_note": "你的 MCP Server 如需发送 HTTP 请求到目标应用，请配置 REST_BASE_URL=http://localhost:8081 (WAF2代理)",
   "mcpServers": {
-    "rest-api": {
-      "displayName": "REST API Tools",
-      "description": "HTTP tools proxied through WAF2 for security analysis",
+    "_example_stdio": {
+      "_comment": "示例: stdio 类型的 MCP Server",
+      "displayName": "My Stdio Server",
+      "command": "node",
+      "args": ["/path/to/your/mcp-server/index.js"],
+      "disabled": true
+    },
+    "_example_http": {
+      "_comment": "示例: HTTP 类型的 MCP Server",
+      "displayName": "My HTTP Server",
       "transportType": "http",
-      "url": "http://waf2:8081",
-      "capabilities": {
-        "tools": [
-          {
-            "name": "test_request",
-            "description": "Send HTTP request to target application through WAF2 proxy",
-            "inputSchema": {
-              "type": "object",
-              "properties": {
-                "method": {
-                  "type": "string",
-                  "enum": ["GET", "POST", "PUT", "DELETE", "PATCH"],
-                  "description": "HTTP method"
-                },
-                "endpoint": {
-                  "type": "string",
-                  "description": "API endpoint path (e.g., /api/products)"
-                },
-                "body": {
-                  "type": "object",
-                  "description": "Request body for POST/PUT/PATCH"
-                },
-                "headers": {
-                  "type": "object",
-                  "description": "Additional HTTP headers"
-                }
-              },
-              "required": ["method", "endpoint"]
-            }
-          }
-        ]
-      }
+      "url": "http://your-mcp-server:3000",
+      "disabled": true
     }
   }
 }

@@ -695,6 +695,20 @@ let config = {
       /SYSTEM\s+["'][^"']*["']/i,
       /<!DOCTYPE[^>]*\[/i,
     ],
+  },
+
+  // 规则启用开关 (Dashboard 可配置)
+  rulesEnabled: {
+    sqlInjection: true,
+    shellInjection: true,  // 对应 Dashboard 的 commandInjection
+    sensitiveFiles: true,
+    protocolAttacks: true,
+    dataExfiltration: true,
+    xss: true,
+    dangerousOperations: true,
+    pathTraversal: true,
+    ssrf: true,
+    injectionOther: true,
   }
 };
 
@@ -714,8 +728,29 @@ const stats = {
 
 export function updateWaf1Config(newConfig) {
   if (newConfig && newConfig.waf1) {
-    config = { ...config, ...newConfig.waf1 };
-    console.log("[WAF1] 配置已更新");
+    // 处理规则开关映射 (Dashboard 字段名 -> WAF1 内部字段名)
+    if (newConfig.waf1.rules) {
+      const ruleMapping = {
+        sqlInjection: 'sqlInjection',
+        commandInjection: 'shellInjection',  // Dashboard 用 commandInjection，内部用 shellInjection
+        xss: 'xss',
+        pathTraversal: 'pathTraversal',
+        sensitiveFiles: 'sensitiveFiles'
+      };
+
+      for (const [dashboardRule, internalRule] of Object.entries(ruleMapping)) {
+        if (newConfig.waf1.rules[dashboardRule] !== undefined) {
+          config.rulesEnabled[internalRule] = newConfig.waf1.rules[dashboardRule];
+        }
+      }
+    }
+
+    // 处理其他配置
+    if (newConfig.waf1.enabled !== undefined) {
+      config.enabled = newConfig.waf1.enabled;
+    }
+
+    console.log("[WAF1] 配置已更新, rulesEnabled:", config.rulesEnabled);
   }
 }
 
@@ -737,6 +772,11 @@ function checkRules(args) {
   const argsStr = JSON.stringify(args);
 
   for (const [category, patterns] of Object.entries(config.rules)) {
+    // 检查该规则是否启用
+    if (config.rulesEnabled && config.rulesEnabled[category] === false) {
+      continue;
+    }
+
     for (const pattern of patterns) {
       if (pattern.test(argsStr)) {
         if (!stats.blockedByRule[category]) stats.blockedByRule[category] = 0;

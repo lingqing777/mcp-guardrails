@@ -1,17 +1,33 @@
-# MCP Guardrails - 通用 MCP WAF 安全网关
+# MCP Guardrails - MCP 安全网关 (WAF1 + WAF2)
 #
-# 快速开始:
+# ============================== 架构说明 ==============================
+#
+#   用户提供:
+#     - Agent (Cursor/Claude Code) - 连接到 MCP Hub
+#     - MCP Server (用户自己的) - 在 config/mcp-servers.json 中配置
+#     - 目标 Web 应用 - MCP Server 要访问的应用
+#
+#   我们提供:
+#     - MCP Hub (WAF1) - MCP 协议层安全检测
+#     - WAF2 - HTTP 流量层 LLM 动态检测
+#
+#   数据流:
+#     Agent → MCP Hub (4000) → 用户的 MCP Server → WAF2 (8081) → 目标应用
+#             ↑ WAF1 检测                          ↑ WAF2 检测
+#
+# ============================== 快速开始 ==============================
+#
 #   1. cp .env.example .env
-#   2. 编辑 .env 中的 TARGET_URL (指向你要测试的应用)
-#   3. docker-compose up -d
+#   2. 编辑 .env 中的 TARGET_URL (你的 MCP Server 要访问的目标应用)
+#   3. 在 config/mcp-servers.json 中配置你的 MCP Server
+#   4. 你的 MCP Server 需配置 HTTP 代理: REST_BASE_URL=http://localhost:8081
+#   5. docker-compose up -d
 #
-# 目标应用场景:
-#   - 本机应用: TARGET_URL=http://host.docker.internal:3000
-#   - 外网应用: TARGET_URL=https://example.com
-#   - 内置靶机: docker-compose -f docker-compose.yml -f targets/juice-shop.yml up -d
+# =====================================================================
 
 services:
   # ==================== WAF2 - HTTP 层 LLM 动态检测 ====================
+  # 作为 HTTP 代理，用户的 MCP Server 发送 HTTP 请求时应配置走这个代理
   waf2:
     build: ./waf2
     container_name: waf2
@@ -30,6 +46,7 @@ services:
     restart: unless-stopped
 
   # ==================== MCP Hub - WAF1 协议层检测 ====================
+  # Agent 连接到这里，MCP Hub 再连接用户在 config/mcp-servers.json 中配置的 MCP Server
   mcphub:
     build: ./mcp-hub
     container_name: mcphub
@@ -38,9 +55,10 @@ services:
     environment:
       - GUARDRAILS_CONFIG=/app/config/guardrails-config.json
       - MCP_SERVERS_CONFIG=/app/config/mcp-servers.json
+      # WAF2 地址，用于配置同步
+      - WAF2_URL=http://waf2:8081
+      # 以下是传递给 WAF2 的目标应用配置
       - TARGET_URL=${TARGET_URL:-http://host.docker.internal:3000}
-      - TARGET_NAME=${TARGET_NAME:-target-app}
-      - TARGET_DISPLAY_NAME=${TARGET_DISPLAY_NAME:-Target Application}
     extra_hosts:
       - "host.docker.internal:host-gateway"
     volumes:
