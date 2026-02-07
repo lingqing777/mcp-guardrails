@@ -2247,7 +2247,6 @@ REST_BASE_URL=<span class="string">http://localhost:8081</span></code>
             updateWaf1Panel();
             updateWaf2Panel();
             updateDetectionsPanel();
-            updateConfigPanelStats();
         }
 
         function updateOverview() {
@@ -2852,12 +2851,6 @@ REST_BASE_URL=<span class="string">http://localhost:8081</span></code>
             URL.revokeObjectURL(url);
 
             showConfigStatus('data-mgmt-status', 'success', '日志已导出');
-        }
-
-        // 更新配置面板中的统计数据 (可选元素，安全访问)
-        function updateConfigPanelStats() {
-            // 这些元素已被移除，此函数保留为空以避免调用错误
-            // 统计数据现在显示在总览面板中
         }
 
         // ==================== MCP Server 管理 (Inspector 风格) ====================

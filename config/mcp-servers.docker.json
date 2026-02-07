@@ -1,0 +1,59 @@
+{
+  "mcpServers": {
+    "juice-shop": {
+      "displayName": "Juice Shop API",
+      "description": "OWASP Juice Shop REST API via WAF2 proxy",
+      "transportType": "http",
+      "url": "http://waf2:8081",
+      "capabilities": {
+        "tools": [
+          {
+            "name": "http_request",
+            "description": "Send HTTP request to Juice Shop through WAF2 proxy",
+            "inputSchema": {
+              "type": "object",
+              "properties": {
+                "method": {
+                  "type": "string",
+                  "enum": ["GET", "POST", "PUT", "DELETE", "PATCH"],
+                  "description": "HTTP method"
+                },
+                "endpoint": {
+                  "type": "string",
+                  "description": "API endpoint path (e.g., /api/products)"
+                },
+                "body": {
+                  "type": "object",
+                  "description": "Request body for POST/PUT/PATCH"
+                },
+                "headers": {
+                  "type": "object",
+                  "description": "Additional HTTP headers"
+                }
+              },
+              "required": ["method", "endpoint"]
+            }
+          }
+        ]
+      }
+    }
+  },
+
+  "waf1": {
+    "enabled": true,
+    "whitelist": ["*"],
+    "blockedKeywords": [
+      "rm -rf",
+      "DROP TABLE",
+      "DELETE FROM",
+      "; cat /etc/passwd",
+      "/etc/shadow",
+      "~/.ssh"
+    ]
+  },
+
+  "waf2": {
+    "port": 8081,
+    "target": "http://juice-shop:3000"
+  }
+}

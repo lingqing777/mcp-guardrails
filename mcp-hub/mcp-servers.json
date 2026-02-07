@@ -1,4 +1,6 @@
 {
+  "_comment": "本地开发环境配置 - Docker 环境请使用 config/mcp-servers.docker.json",
+
   "mcpServers": {
     "rest-api": {
       "command": "node",

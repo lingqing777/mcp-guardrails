@@ -35,6 +35,7 @@ services:
       - "4000:4000"
     environment:
       - GUARDRAILS_CONFIG=/app/config/guardrails-config.json
+      - MCP_SERVERS_CONFIG=/app/config/mcp-servers.docker.json
     volumes:
       - ./config:/app/config
 

@@ -5,6 +5,7 @@ MCP Guardrails 对比演示
 注意: 此脚本用于演示目的，需要先启动 MCP Hub 和 WAF2
 使用方法: python test_guardrails.py
 """
+import re
 import requests
 import json
 
@@ -43,7 +44,6 @@ def call_mcp(desc, method, endpoint, body=None):
             print(f"  [放行] 状态码: {resp.status_code}")
             # 尝试提取内部响应状态码
             if "statusCode" in result_text:
-                import re
                 status_match = re.search(r'"statusCode":\s*(\d+)', result_text)
                 if status_match:
                     print(f"  [目标响应] HTTP {status_match.group(1)}")
