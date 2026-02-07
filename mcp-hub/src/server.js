@@ -20,7 +20,7 @@ import { getMarketplace } from "./marketplace.js";
 import { MCPServerEndpoint } from "./mcp/server.js";
 import { WorkspaceCacheManager } from "./utils/workspace-cache.js";
 // WAF1 - MCP Guardrails 中间件
-import { waf1Middleware, getWaf1Stats, getDashboardData, getTimeSeriesData, getCallHistory, resetStats, setWaf1Enabled, isWaf1Enabled } from "./waf1.js";
+import { waf1Middleware, getWaf1Stats, getDashboardData, getTimeSeriesData, getCallHistory, resetStats, setWaf1Enabled, isWaf1Enabled, updateWaf1Config } from "./waf1.js";
 
 const SERVER_ID = "mcp-hub";
 
@@ -61,18 +61,48 @@ const defaultConfig = {
   }
 };
 
-// 加载配置
+// 加载配置 (优先级: 环境变量 > 配置文件 > 默认值)
 function loadGuardrailsConfig() {
+  let config = { ...defaultConfig };
+
+  // 1. 先从配置文件加载
   try {
     if (fs.existsSync(CONFIG_FILE)) {
       const data = fs.readFileSync(CONFIG_FILE, 'utf-8');
-      const config = JSON.parse(data);
-      return { ...defaultConfig, ...config };
+      const fileConfig = JSON.parse(data);
+      config = deepMerge(config, fileConfig);
     }
   } catch (e) {
-    console.error('[Config] 加载配置失败:', e.message);
+    console.error('[Config] 加载配置文件失败:', e.message);
   }
-  return defaultConfig;
+
+  // 2. 环境变量覆盖 (最高优先级)
+  if (process.env.TARGET_URL) {
+    config.waf2.upstream = process.env.TARGET_URL;
+    console.log(`[Config] 从环境变量加载 TARGET_URL: ${process.env.TARGET_URL}`);
+  }
+  if (process.env.QWEN_API_KEY) {
+    config.waf2.llm.apiKey = process.env.QWEN_API_KEY;
+    console.log('[Config] 从环境变量加载 QWEN_API_KEY');
+  }
+  if (process.env.LLM_MODEL) {
+    config.waf2.llm.model = process.env.LLM_MODEL;
+  }
+
+  return config;
+}
+
+// 深度合并对象
+function deepMerge(target, source) {
+  const result = { ...target };
+  for (const key of Object.keys(source)) {
+    if (source[key] && typeof source[key] === 'object' && !Array.isArray(source[key])) {
+      result[key] = deepMerge(result[key] || {}, source[key]);
+    } else {
+      result[key] = source[key];
+    }
+  }
+  return result;
 }
 
 // 保存配置
@@ -89,34 +119,47 @@ function saveGuardrailsConfig(config) {
 // WAF2 地址 (Docker 网络中)
 const WAF2_URL = process.env.WAF2_URL || 'http://waf2:8081';
 
-// 同步配置到 WAF2
-async function syncToWaf2(waf2Config) {
-  try {
-    const response = await fetch(`${WAF2_URL}/waf2/config`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        enabled: waf2Config.enabled,
-        upstream: waf2Config.upstream,
-        api_key: waf2Config.llm?.apiKey,
-        model: waf2Config.llm?.model,
-        request_analysis: waf2Config.features?.requestAnalysis,
-        response_analysis: waf2Config.features?.responseAnalysis,
-        cache_enabled: waf2Config.features?.cache
-      })
-    });
+// 同步配置到 WAF2 (带重试)
+async function syncToWaf2(waf2Config, retries = 2) {
+  const payload = {
+    enabled: waf2Config.enabled,
+    upstream: waf2Config.upstream,
+    api_key: waf2Config.llm?.apiKey,
+    model: waf2Config.llm?.model,
+    request_analysis: waf2Config.features?.requestAnalysis,
+    response_analysis: waf2Config.features?.responseAnalysis,
+    cache_enabled: waf2Config.features?.cache
+  };
 
-    if (response.ok) {
-      console.log('[Config] WAF2 配置已同步');
-      return true;
-    } else {
-      console.error('[Config] WAF2 同步失败:', response.status);
-      return false;
+  for (let attempt = 0; attempt <= retries; attempt++) {
+    try {
+      const response = await fetch(`${WAF2_URL}/waf2/config`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload)
+      });
+
+      if (response.ok) {
+        const result = await response.json();
+        console.log('[Config] WAF2 配置已同步:', result.message || 'success');
+        return { success: true, message: result.message };
+      } else {
+        const errorText = await response.text();
+        console.error(`[Config] WAF2 同步失败 (${response.status}):`, errorText);
+        if (attempt === retries) {
+          return { success: false, error: `HTTP ${response.status}: ${errorText}` };
+        }
+      }
+    } catch (e) {
+      console.error(`[Config] WAF2 同步错误 (尝试 ${attempt + 1}/${retries + 1}):`, e.message);
+      if (attempt === retries) {
+        return { success: false, error: e.message };
+      }
+      // 等待后重试
+      await new Promise(resolve => setTimeout(resolve, 1000));
     }
-  } catch (e) {
-    console.error('[Config] WAF2 同步失败:', e.message);
-    return false;
   }
+  return { success: false, error: '同步超时' };
 }
 
 // 当前配置
@@ -203,6 +246,9 @@ app.post("/api/config/waf1", (req, res) => {
   saveGuardrailsConfig(guardrailsConfig);
   applyWaf1Config();
 
+  // 同步规则到 WAF1 运行时
+  updateWaf1Config(guardrailsConfig);
+
   res.json({
     success: true,
     waf1: guardrailsConfig.waf1,
@@ -234,11 +280,12 @@ app.post("/api/config/waf2", async (req, res) => {
   saveGuardrailsConfig(guardrailsConfig);
 
   // 同步到 WAF2 容器
-  const synced = await syncToWaf2(guardrailsConfig.waf2);
+  const syncResult = await syncToWaf2(guardrailsConfig.waf2);
 
   res.json({
     success: true,
-    synced,
+    synced: syncResult.success,
+    syncError: syncResult.error,
     waf2: {
       ...guardrailsConfig.waf2,
       llm: {
@@ -275,11 +322,12 @@ app.post("/api/config", async (req, res) => {
   applyWaf1Config();
 
   // 同步到 WAF2 容器
-  const synced = await syncToWaf2(guardrailsConfig.waf2);
+  const syncResult = await syncToWaf2(guardrailsConfig.waf2);
 
   res.json({
     success: true,
-    synced,
+    synced: syncResult.success,
+    syncError: syncResult.error,
     config: {
       ...guardrailsConfig,
       waf2: {

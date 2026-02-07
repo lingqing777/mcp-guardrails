@@ -852,17 +852,32 @@ export function waf1Middleware(req, res, next) {
     return next();
   }
 
-  if (req.path !== "/servers/tools" || req.method !== "POST") {
+  // 需要 WAF1 保护的路由列表
+  const protectedRoutes = [
+    { path: "/servers/tools", method: "POST" },     // 工具调用
+    { path: "/servers/prompts", method: "POST" },   // 提示词调用
+    { path: "/servers/resources", method: "POST" }, // 资源访问
+    { path: "/tools/call", method: "POST" },        // 简单工具调用 API
+  ];
+
+  // 检查是否匹配保护路由
+  const isProtectedRoute = protectedRoutes.some(
+    route => req.path === route.path && req.method === route.method
+  );
+
+  if (!isProtectedRoute) {
     return next();
   }
 
-  const { tool, arguments: args } = req.body;
-  if (!tool) return next();
+  const { tool, arguments: args, prompt, uri } = req.body;
+  // 根据不同路由获取检查目标
+  const checkTarget = tool || prompt || uri;
+  if (!checkTarget && !args) return next();
 
   stats.total++;
   const startTime = Date.now();
 
-  console.log(`[WAF1] ── 检测工具调用: ${tool} ──`);
+  console.log(`[WAF1] ── 检测请求: ${req.path} (${checkTarget || 'unknown'}) ──`);
 
   // Stage -1: 速率限制 (Cloudflare/AWS WAF)
   const clientId = req.headers['x-user-id'] || req.ip || 'unknown';
@@ -880,7 +895,7 @@ export function waf1Middleware(req, res, next) {
 
   // Stage 0: RBAC 访问控制 (Invariant access_control.py)
   const userId = req.headers['x-user-id'] || req.body.user_id || 'anonymous';
-  const rbacResult = checkRBAC(userId, tool);
+  const rbacResult = checkRBAC(userId, checkTarget);
   if (!rbacResult.allowed) {
     stats.blocked++;
     stats.blockedByDetector.rbac++;
@@ -893,7 +908,7 @@ export function waf1Middleware(req, res, next) {
   }
 
   // Stage 1: 白名单
-  const whitelistResult = checkWhitelist(tool);
+  const whitelistResult = checkWhitelist(checkTarget);
   if (!whitelistResult.allowed) {
     stats.blocked++;
     stats.blockedByTool++;
@@ -909,7 +924,7 @@ export function waf1Middleware(req, res, next) {
   const ruleResult = checkRules(args || {});
   if (!ruleResult.allowed) {
     stats.blocked++;
-    const record = { ts: Date.now(), tool, stage: 'rules', ...ruleResult };
+    const record = { ts: Date.now(), tool: checkTarget, stage: 'rules', ...ruleResult };
     stats.detections.push(record);
     if (stats.detections.length > 100) stats.detections.shift();
     console.log(`[WAF1] ❌ 规则拦截: ${ruleResult.reason}`);
@@ -922,7 +937,7 @@ export function waf1Middleware(req, res, next) {
   }
 
   // Stage 3: Invariant 检测器
-  const detectorResults = runDetectors(tool, args || {});
+  const detectorResults = runDetectors(checkTarget, args || {});
   const blocked = detectorResults.filter(r => !r.allowed);
 
   if (blocked.length > 0) {
@@ -931,7 +946,7 @@ export function waf1Middleware(req, res, next) {
     const primary = blocked[0];
     const record = {
       ts: Date.now(),
-      tool,
+      tool: checkTarget,
       stage: 'detector',
       detector: primary.detector,
       reason: primary.reason,
@@ -956,7 +971,7 @@ export function waf1Middleware(req, res, next) {
 
   const elapsed = Date.now() - startTime;
   stats.passed++;
-  console.log(`[WAF1] ✅ 放行: ${tool} (${elapsed}ms)`);
+  console.log(`[WAF1] ✅ 放行: ${checkTarget} (${elapsed}ms)`);
   next();
 }
 

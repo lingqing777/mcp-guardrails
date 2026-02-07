@@ -1,14 +1,14 @@
 {
   "mcpServers": {
-    "target-app": {
-      "displayName": "Target Application",
-      "description": "Target web application via WAF2 proxy",
+    "rest-api": {
+      "displayName": "REST API Tools",
+      "description": "HTTP tools proxied through WAF2 for security analysis",
       "transportType": "http",
       "url": "http://waf2:8081",
       "capabilities": {
         "tools": [
           {
-            "name": "http_request",
+            "name": "test_request",
             "description": "Send HTTP request to target application through WAF2 proxy",
             "inputSchema": {
               "type": "object",
@@ -37,23 +37,5 @@
         ]
       }
     }
-  },
-
-  "waf1": {
-    "enabled": true,
-    "whitelist": ["*"],
-    "blockedKeywords": [
-      "rm -rf",
-      "DROP TABLE",
-      "DELETE FROM",
-      "; cat /etc/passwd",
-      "/etc/shadow",
-      "~/.ssh"
-    ]
-  },
-
-  "waf2": {
-    "port": 8081,
-    "target": "http://target-app:3000"
   }
 }

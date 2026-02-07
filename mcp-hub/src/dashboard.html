@@ -2610,7 +2610,8 @@ REST_BASE_URL=<span class="string">http://localhost:8081</span></code>
                     if (data.synced) {
                         showConfigStatus('config-status', 'success', '配置已保存，WAF2 已同步生效');
                     } else {
-                        showConfigStatus('config-status', 'warning', '配置已保存，但 WAF2 同步失败 (重启容器后生效)');
+                        const errorMsg = data.syncError ? `: ${data.syncError}` : '';
+                        showConfigStatus('config-status', 'warning', `配置已保存，但 WAF2 同步失败${errorMsg}`);
                     }
                 } else {
                     showConfigStatus('config-status', 'error', data.error || '保存失败');
