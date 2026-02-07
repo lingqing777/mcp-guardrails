@@ -1,44 +1,62 @@
-services:
-  # 目标靶机 - Juice Shop
-  juice-shop:
-    image: bkimminich/juice-shop
-    container_name: juice-shop
-    ports:
-      - "3000:3000"
-    networks:
-      - mcp-net
+# MCP Guardrails - 通用 MCP WAF 安全网关
+#
+# 使用方法:
+#   1. 复制 .env.example 为 .env
+#   2. 配置目标应用 URL 和名称
+#   3. 运行: docker-compose up -d
+#
+# 配置外部目标应用:
+#   设置 EXTERNAL_TARGET=true，然后指定 TARGET_URL
 
-  # WAF2 - HTTP 层 LLM 动态检测
+services:
+  # ==================== WAF2 - HTTP 层 LLM 动态检测 ====================
   waf2:
     build: ./waf2
     container_name: waf2
     ports:
-      - "8081:8081"
+      - "${WAF2_PORT:-8081}:8081"
     environment:
-      - UPSTREAM=http://juice-shop:3000
+      - UPSTREAM=${TARGET_URL:-http://target-app:3000}
       - QWEN_API_KEY=${QWEN_API_KEY:-}
-    depends_on:
-      - juice-shop
+      - LLM_MODEL=${LLM_MODEL:-qwen-turbo}
     networks:
       - mcp-net
+    restart: unless-stopped
 
-  # MCP Hub - 多靶机协同平台
+  # ==================== MCP Hub - WAF1 协议层检测 ====================
   mcphub:
     build: ./mcp-hub
     container_name: mcphub
-    networks:
-      - mcp-net
-    depends_on:
-      - juice-shop
-      - waf2
     ports:
-      - "4000:4000"
+      - "${MCP_HUB_PORT:-4000}:4000"
     environment:
       - GUARDRAILS_CONFIG=/app/config/guardrails-config.json
-      - MCP_SERVERS_CONFIG=/app/config/mcp-servers.docker.json
+      - MCP_SERVERS_CONFIG=/app/config/mcp-servers.json
+      - TARGET_URL=${TARGET_URL:-http://target-app:3000}
+      - TARGET_NAME=${TARGET_NAME:-target-app}
+      - TARGET_DISPLAY_NAME=${TARGET_DISPLAY_NAME:-Target Application}
     volumes:
       - ./config:/app/config
+    networks:
+      - mcp-net
+    restart: unless-stopped
 
 networks:
   mcp-net:
     driver: bridge
+
+# ==================== 目标应用配置 (可选) ====================
+#
+# 如需内置目标应用，创建 docker-compose.override.yml:
+#
+# services:
+#   target-app:
+#     image: bkimminich/juice-shop  # 或其他镜像
+#     container_name: target-app
+#     ports:
+#       - "3000:3000"
+#     networks:
+#       - mcp-net
+#
+# 或使用预定义的配置:
+#   docker-compose -f docker-compose.yml -f targets/juice-shop.yml up -d

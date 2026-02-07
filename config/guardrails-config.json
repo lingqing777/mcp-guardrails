@@ -12,7 +12,7 @@
   },
   "waf2": {
     "enabled": true,
-    "upstream": "http://juice-shop:3000",
+    "upstream": "http://target-app:3000",
     "llm": {
       "provider": "qwen",
       "model": "qwen-turbo",

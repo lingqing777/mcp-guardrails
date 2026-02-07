@@ -1,10 +1,10 @@
 {
-  "_comment": "本地开发环境配置 - Docker 环境请使用 config/mcp-servers.docker.json",
+  "_comment": "本地开发环境配置",
 
   "mcpServers": {
     "rest-api": {
       "command": "node",
-      "args": ["/mnt/d/Desktop/ctf/work_game/mcp-rest-api/build/index.js"],
+      "args": ["./path/to/mcp-rest-api/build/index.js"],
       "env": {
         "REST_BASE_URL": "http://localhost:8081"
       }

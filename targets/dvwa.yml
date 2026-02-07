@@ -1,0 +1,16 @@
+# DVWA 目标应用配置
+#
+# 使用方法:
+#   docker-compose -f docker-compose.yml -f targets/dvwa.yml up -d
+#
+# 默认登录: admin / password
+
+services:
+  target-app:
+    image: vulnerables/web-dvwa
+    container_name: target-app
+    ports:
+      - "3000:80"
+    networks:
+      - mcp-net
+    restart: unless-stopped

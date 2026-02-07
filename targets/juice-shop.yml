@@ -1,0 +1,14 @@
+# Juice Shop 目标应用配置
+#
+# 使用方法:
+#   docker-compose -f docker-compose.yml -f targets/juice-shop.yml up -d
+
+services:
+  target-app:
+    image: bkimminich/juice-shop
+    container_name: target-app
+    ports:
+      - "3000:3000"
+    networks:
+      - mcp-net
+    restart: unless-stopped

@@ -1,0 +1,16 @@
+# WebGoat 目标应用配置
+#
+# 使用方法:
+#   docker-compose -f docker-compose.yml -f targets/webgoat.yml up -d
+#
+# 访问: http://localhost:3000/WebGoat
+
+services:
+  target-app:
+    image: webgoat/webgoat
+    container_name: target-app
+    ports:
+      - "3000:8080"
+    networks:
+      - mcp-net
+    restart: unless-stopped

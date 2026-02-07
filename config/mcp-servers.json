@@ -1,15 +1,15 @@
 {
   "mcpServers": {
-    "juice-shop": {
-      "displayName": "Juice Shop API",
-      "description": "OWASP Juice Shop REST API via WAF2 proxy",
+    "target-app": {
+      "displayName": "Target Application",
+      "description": "Target web application via WAF2 proxy",
       "transportType": "http",
       "url": "http://waf2:8081",
       "capabilities": {
         "tools": [
           {
             "name": "http_request",
-            "description": "Send HTTP request to Juice Shop through WAF2 proxy",
+            "description": "Send HTTP request to target application through WAF2 proxy",
             "inputSchema": {
               "type": "object",
               "properties": {
@@ -54,6 +54,6 @@
 
   "waf2": {
     "port": 8081,
-    "target": "http://juice-shop:3000"
+    "target": "http://target-app:3000"
   }
 }

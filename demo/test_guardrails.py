@@ -4,19 +4,25 @@ MCP Guardrails 对比演示
 
 注意: 此脚本用于演示目的，需要先启动 MCP Hub 和 WAF2
 使用方法: python test_guardrails.py
+
+环境变量:
+  MCP_HUB_URL  - MCP Hub 地址 (默认: http://localhost:4000)
+  TARGET_NAME  - 目标应用名称 (默认: target-app)
 """
+import os
 import re
 import requests
 import json
 
-MCP_HUB = "http://localhost:4000"
+# 从环境变量读取配置
+MCP_HUB = os.environ.get("MCP_HUB_URL", "http://localhost:4000")
+TARGET_NAME = os.environ.get("TARGET_NAME", "target-app")
 
 def call_mcp(desc, method, endpoint, body=None):
     """通过 MCP Hub 调用工具 (直接测试 WAF)"""
-    # 使用 /api/tools/call 端点
     payload = {
-        "server_name": "juice-shop",  # 使用 docker-compose 中定义的服务
-        "tool": "http_request",       # 假设有 HTTP 请求工具
+        "server_name": TARGET_NAME,
+        "tool": "http_request",
         "arguments": {
             "method": method,
             "endpoint": endpoint
@@ -34,7 +40,6 @@ def call_mcp(desc, method, endpoint, body=None):
             return
 
         data = resp.json()
-        # 检查 MCP Server 返回的结果中是否有 WAF2 拦截信息
         result_text = str(data)
         if "403" in result_text and "blocked" in result_text.lower():
             print(f"  [WAF2 拦截] LLM 检测到恶意请求")
@@ -42,7 +47,6 @@ def call_mcp(desc, method, endpoint, body=None):
             print(f"  [WAF2 拦截] 请求被拦截")
         else:
             print(f"  [放行] 状态码: {resp.status_code}")
-            # 尝试提取内部响应状态码
             if "statusCode" in result_text:
                 status_match = re.search(r'"statusCode":\s*(\d+)', result_text)
                 if status_match:
@@ -55,6 +59,8 @@ def main():
     print("=" * 60)
     print("  MCP Guardrails 双层防护对比演示")
     print("=" * 60)
+    print(f"\n  MCP Hub: {MCP_HUB}")
+    print(f"  目标应用: {TARGET_NAME}")
 
     # ==================== WAF1 测试 ====================
     print("\n" + "=" * 60)
