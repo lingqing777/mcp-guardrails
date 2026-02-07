@@ -20,7 +20,7 @@ import { getMarketplace } from "./marketplace.js";
 import { MCPServerEndpoint } from "./mcp/server.js";
 import { WorkspaceCacheManager } from "./utils/workspace-cache.js";
 // WAF1 - MCP Guardrails 中间件
-import { waf1Middleware, getWaf1Stats, getDashboardData, getTimeSeriesData, getCallHistory, resetStats, setWaf1Enabled, isWaf1Enabled, updateWaf1Config } from "./waf1.js";
+import { waf1Middleware, getWaf1Stats, getDashboardData, getTimeSeriesData, getCallHistory, resetStats, setWaf1Enabled, isWaf1Enabled, updateWaf1Config } from "./waf1/index.js";
 
 const SERVER_ID = "mcp-hub";
 
