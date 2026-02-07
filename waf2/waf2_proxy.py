@@ -46,10 +46,11 @@ class WAF2Config:
         self.enabled = True
         self.upstream = os.environ.get("UPSTREAM", "http://127.0.0.1:3000")
         self.api_key = os.environ.get("QWEN_API_KEY", "")
-        self.model = os.environ.get("QWEN_MODEL", "qwen-turbo")
+        self.model = os.environ.get("QWEN_MODEL", os.environ.get("LLM_MODEL", "qwen-turbo"))
         self.request_analysis = True
         self.response_analysis = True
         self.cache_enabled = True
+        self.verify_ssl = os.environ.get("VERIFY_SSL", "true").lower() == "true"
 
 config = WAF2Config()
 
@@ -484,7 +485,7 @@ async def proxy(path: str, request: Request):
     if not config.enabled:
         print(f"[WAF2] ⏸️ WAF2 已禁用，直接转发")
         try:
-            async with httpx.AsyncClient(timeout=30.0) as client:
+            async with httpx.AsyncClient(timeout=30.0, verify=config.verify_ssl) as client:
                 headers = {k: v for k, v in request.headers.items()
                           if k.lower() not in ["host", "content-length"]}
                 upstream_resp = await client.request(
@@ -539,7 +540,7 @@ async def proxy(path: str, request: Request):
 
     # ========== 阶段2: 转发请求 ==========
     try:
-        async with httpx.AsyncClient(timeout=30.0) as client:
+        async with httpx.AsyncClient(timeout=30.0, verify=config.verify_ssl) as client:
             headers = {k: v for k, v in request.headers.items()
                       if k.lower() not in ["host", "content-length"]}
 

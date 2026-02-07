@@ -12,7 +12,7 @@
   },
   "waf2": {
     "enabled": true,
-    "upstream": "http://target-app:3000",
+    "upstream": "http://host.docker.internal:3000",
     "llm": {
       "provider": "qwen",
       "model": "qwen-turbo",

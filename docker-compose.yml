@@ -1,12 +1,14 @@
 # MCP Guardrails - 通用 MCP WAF 安全网关
 #
-# 使用方法:
-#   1. 复制 .env.example 为 .env
-#   2. 配置目标应用 URL 和名称
-#   3. 运行: docker-compose up -d
+# 快速开始:
+#   1. cp .env.example .env
+#   2. 编辑 .env 中的 TARGET_URL (指向你要测试的应用)
+#   3. docker-compose up -d
 #
-# 配置外部目标应用:
-#   设置 EXTERNAL_TARGET=true，然后指定 TARGET_URL
+# 目标应用场景:
+#   - 本机应用: TARGET_URL=http://host.docker.internal:3000
+#   - 外网应用: TARGET_URL=https://example.com
+#   - 内置靶机: docker-compose -f docker-compose.yml -f targets/juice-shop.yml up -d
 
 services:
   # ==================== WAF2 - HTTP 层 LLM 动态检测 ====================
@@ -16,9 +18,13 @@ services:
     ports:
       - "${WAF2_PORT:-8081}:8081"
     environment:
-      - UPSTREAM=${TARGET_URL:-http://target-app:3000}
+      - UPSTREAM=${TARGET_URL:-http://host.docker.internal:3000}
       - QWEN_API_KEY=${QWEN_API_KEY:-}
       - LLM_MODEL=${LLM_MODEL:-qwen-turbo}
+      - VERIFY_SSL=${VERIFY_SSL:-true}
+    extra_hosts:
+      # Linux 需要这个来访问宿主机，Windows/Mac Docker Desktop 已内置
+      - "host.docker.internal:host-gateway"
     networks:
       - mcp-net
     restart: unless-stopped
@@ -32,9 +38,11 @@ services:
     environment:
       - GUARDRAILS_CONFIG=/app/config/guardrails-config.json
       - MCP_SERVERS_CONFIG=/app/config/mcp-servers.json
-      - TARGET_URL=${TARGET_URL:-http://target-app:3000}
+      - TARGET_URL=${TARGET_URL:-http://host.docker.internal:3000}
       - TARGET_NAME=${TARGET_NAME:-target-app}
       - TARGET_DISPLAY_NAME=${TARGET_DISPLAY_NAME:-Target Application}
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     volumes:
       - ./config:/app/config
     networks:
@@ -44,19 +52,3 @@ services:
 networks:
   mcp-net:
     driver: bridge
-
-# ==================== 目标应用配置 (可选) ====================
-#
-# 如需内置目标应用，创建 docker-compose.override.yml:
-#
-# services:
-#   target-app:
-#     image: bkimminich/juice-shop  # 或其他镜像
-#     container_name: target-app
-#     ports:
-#       - "3000:3000"
-#     networks:
-#       - mcp-net
-#
-# 或使用预定义的配置:
-#   docker-compose -f docker-compose.yml -f targets/juice-shop.yml up -d
