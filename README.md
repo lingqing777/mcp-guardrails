@@ -150,7 +150,9 @@ docker-compose up -d
 ### 5. 访问仪表盘
 
 打开浏览器访问：`http://localhost:8888/dashboard.html`
+
 登录默认密码admin/guardrails
+
 可通过环境变量DASHBOARD_USERNAME/DASHBOARD_PASSWORD覆盖
 
 ## 仪表盘功能
