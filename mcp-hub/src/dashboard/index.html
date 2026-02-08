@@ -10,6 +10,9 @@
     <div class="header">
         <h1>MCP Guardrails Security Dashboard</h1>
         <div class="status">
+            <div class="status-item" id="user-display">
+                <!-- 用户信息由 JS 填充 -->
+            </div>
             <div class="status-item">
                 <span class="status-dot" id="waf1-status"></span>
                 <span>WAF1 (MCP Layer)</span>
@@ -532,6 +535,6 @@ REST_BASE_URL=<span class="string">http://localhost:8081</span></code>
         </div>
     </div>
 
-    <script src="app.js"></script>
+    <script type="module" src="app.js"></script>
 </body>
 </html>

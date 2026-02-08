@@ -5,6 +5,7 @@
 
 import express from "express";
 import cors from "cors";
+import cookieParser from "cookie-parser";
 import path from "path";
 import { fileURLToPath } from "url";
 import logger from "./utils/logger.js";
@@ -20,6 +21,12 @@ import {
 } from "./utils/errors.js";
 import { MCPServerEndpoint } from "./mcp/server.js";
 import { HubState } from "./utils/sse-manager.js";
+
+// 认证模块
+import {
+  authMiddleware,
+  registerAuthRoutes,
+} from "./utils/auth.js";
 
 // Services
 import { ServiceManager } from "./services/service-manager.js";
@@ -54,6 +61,9 @@ import {
 let serviceManager = null;
 let guardrailsConfig = loadGuardrailsConfig();
 
+// 是否启用认证 (可通过环境变量禁用)
+const AUTH_ENABLED = process.env.DISABLE_AUTH !== 'true';
+
 // ==================== 配置辅助函数 ====================
 
 function getConfig() {
@@ -84,8 +94,12 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
 const app = express();
-app.use(cors());
+app.use(cors({
+  origin: true,
+  credentials: true  // 允许跨域携带 Cookie
+}));
 app.use(express.json());
+app.use(cookieParser());
 
 // Dashboard 静态文件服务 (支持 Docker 和本地开发)
 // Docker: /app/src/dashboard/
@@ -93,7 +107,35 @@ app.use(express.json());
 const dockerDashboardPath = '/app/src/dashboard';
 const localDashboardPath = path.join(__dirname, 'dashboard');
 
-// 静态文件中间件 (CSS, JS)
+// ==================== 认证路由 (无需登录) ====================
+
+if (AUTH_ENABLED) {
+  registerAuthRoutes(app);
+  console.log('[Auth] 认证系统已启用 (默认账号: admin / guardrails)');
+} else {
+  console.log('[Auth] 认证系统已禁用 (DISABLE_AUTH=true)');
+}
+
+// ==================== 公开路由 (无需登录) ====================
+
+// MCP SSE 端点 (供 Agent 连接，不需要 Dashboard 登录)
+// 注意：这些在认证中间件之前注册
+
+// ==================== 认证中间件 ====================
+
+// 需要保护的路由应用认证中间件
+if (AUTH_ENABLED) {
+  // 保护 Dashboard 主页
+  app.get('/', authMiddleware, (req, res, next) => next());
+
+  // 保护静态资源
+  app.use('/dashboard', authMiddleware);
+
+  // 保护大部分 API (除了公开的端点)
+  // 注意：/api/health, /mcp, /messages, /oauth 是公开的
+}
+
+// 静态文件中间件 (CSS, JS) - 在认证之后
 app.use('/dashboard', express.static(dockerDashboardPath, { fallthrough: true }));
 app.use('/dashboard', express.static(localDashboardPath));
 
@@ -122,7 +164,20 @@ app.get('/', (req, res) => {
   });
 });
 
-// ==================== 注册 API 路由 ====================
+// ==================== 公开 API (无需登录) ====================
+
+// MCP 端点路由 (供 Agent 连接)
+registerMCPEndpointRoutes(app, getServiceManager);
+
+// OAuth 回调 (用于 MCP Server 授权)
+registerOAuthRoutes(getServiceManager);
+
+// ==================== 受保护的 API 路由 ====================
+
+// 应用 API 认证中间件
+if (AUTH_ENABLED) {
+  app.use('/api', authMiddleware);
+}
 
 // 配置管理 API
 registerConfigRoutes(app, getConfig, setConfig, applyWaf1Config, updateWaf1Config, isWaf1Enabled);
@@ -144,16 +199,12 @@ app.use("/api", router);
 // 核心路由
 registerHealthRoute(getServiceManager);
 registerSSERoute(getServiceManager);
-registerMCPEndpointRoutes(app, getServiceManager);
 registerMarketplaceRoutes(getServiceManager);
 registerWorkspacesRoute(getServiceManager);
 registerRestartRoutes(getServiceManager);
 
 // MCP 服务器管理路由
 registerServerRoutes(getServiceManager);
-
-// OAuth 路由
-registerOAuthRoutes(getServiceManager);
 
 // ==================== 错误处理 ====================
 
