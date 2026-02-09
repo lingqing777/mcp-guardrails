@@ -17,11 +17,15 @@
 #
 # ============================== 快速开始 ==============================
 #
+# 【场景A】代理到你自己的应用
+#
 #   1. cp .env.example .env
-#   2. 编辑 .env 中的 TARGET_URL (你的 MCP Server 要访问的目标应用)
-#   3. 在 config/mcp-servers.json 中配置你的 MCP Server
-#   4. 你的 MCP Server 需配置 HTTP 代理: REST_BASE_URL=http://localhost:8081
-#   5. docker-compose up -d
+#   2. 编辑 .env 中的 TARGET_URL (本机/内网/外网均可)
+#   3. docker-compose up -d
+#
+# 【场景B】使用内置靶机
+#
+#   docker-compose -f docker-compose.yml -f targets/juice-shop.yml up -d
 #
 # =====================================================================
 

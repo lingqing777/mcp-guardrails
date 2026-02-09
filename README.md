@@ -4,8 +4,6 @@
 
 为 AI Agent 与 MCP Server 之间的通信提供企业级安全防护，防止 Prompt Injection、数据泄露、恶意工具调用等攻击。
 
-![Architecture](docs/architecture.png)
-
 ## 特性
 
 ### 双层 WAF 架构
@@ -58,104 +56,62 @@
 
 ### 前置要求
 
-- Node.js >= 18
-- Python >= 3.9
-- Docker & Docker Compose (可选)
+- Docker & Docker Compose
 
-### 1. 克隆项目
+### 使用场景
+
+项目支持两种使用场景：
+
+| 场景 | 说明 | 适用情况 |
+|------|------|----------|
+| **场景A** | 代理到你自己的应用 | 本机/内网/外网应用均可 |
+| **场景B** | 使用内置靶机 | 快速体验、安全测试 |
+
+### 场景A：代理到你自己的应用
 
 ```bash
+# 1. 克隆项目
 git clone https://github.com/lingqing777/mcp-guardrails.git
 cd mcp-guardrails
-```
 
-### 2. 安装依赖
+# 2. 配置目标 URL
+cp .env.example .env
+# 编辑 .env，设置 TARGET_URL 为你的应用地址：
+#   - 本机应用:  http://host.docker.internal:8080
+#   - 内网应用:  http://192.168.1.100:8080
+#   - 外网应用:  https://example.com
 
-```bash
-# MCP Hub
-cd mcp-hub
-npm install
-
-# WAF2
-cd ../waf2
-pip install -r requirements.txt
-```
-
-### 3. 配置
-
-复制示例配置文件：
-
-```bash
-cp config.example.json config.json
-```
-
-编辑 `config.json`：
-
-```json
-{
-  "mcpServers": {
-    "rest-api": {
-      "command": "node",
-      "args": ["path/to/mcp-server/build/index.js"],
-      "env": {
-        "REST_BASE_URL": "http://localhost:8081"
-      }
-    }
-  },
-  "waf1": {
-    "enabled": true,
-    "mode": "block",
-    "rules": {
-      "sqlInjection": {"enabled": true, "severity": "high"},
-      "commandInjection": {"enabled": true, "severity": "critical"},
-      "xss": {"enabled": true, "severity": "high"}
-    }
-  },
-  "waf2": {
-    "enabled": true,
-    "upstream": "http://localhost:3000",
-    "llm": {
-      "provider": "qwen",
-      "model": "qwen-turbo",
-      "apiKey": "${QWEN_API_KEY}"
-    }
-  }
-}
-```
-
-### 4. 启动服务
-
-**方式一：手动启动**
-
-```bash
-# 终端 1 - MCP Hub (WAF1)
-cd mcp-hub
-node src/utils/cli.js --port 4000 --config ../config.json
-
-# 终端 2 - WAF2 Proxy
-cd waf2
-export QWEN_API_KEY="your-api-key"
-python waf2_proxy.py
-
-# 终端 3 - 目标应用 (示例: Juice Shop)
-docker run -p 3000:3000 bkimminich/juice-shop
-```
-
-**方式二：Docker Compose**
-
-```bash
+# 3. 启动
 docker-compose up -d
+
+# 4. 访问 Dashboard
+open http://localhost:4000
 ```
 
-### 5. 访问仪表盘
+### 场景B：使用内置靶机
 
-打开浏览器访问：`http://localhost:8888/dashboard.html`
+```bash
+# OWASP Juice Shop
+docker-compose -f docker-compose.yml -f targets/juice-shop.yml up -d
 
-登录默认密码admin/guardrails
+# 或 DVWA
+docker-compose -f docker-compose.yml -f targets/dvwa.yml up -d
 
-可通过环境变量DASHBOARD_USERNAME/DASHBOARD_PASSWORD覆盖
+# 或 WebGoat
+docker-compose -f docker-compose.yml -f targets/webgoat.yml up -d
+```
 
-## 仪表盘功能
+### 访问服务
+
+| 服务 | 地址 | 说明 |
+|------|------|------|
+| Dashboard | http://localhost:4000 | 安全仪表盘 |
+| MCP Hub | http://localhost:4000/mcp | Agent 连接入口 |
+| WAF2 | http://localhost:8081 | HTTP 代理入口 |
+
+**Dashboard 登录：** 默认账号 `admin` / `guardrails`，可通过环境变量 `DASHBOARD_USERNAME` / `DASHBOARD_PASSWORD` 覆盖。
+
+## Dashboard 功能
 
 ### 总览页面
 - 实时请求统计
@@ -168,10 +124,10 @@ docker-compose up -d
 - 可用工具列表
 - 工具测试面板
 
-### 配置面板 (cc-switch 风格)
+### 配置面板
+- 防护模式切换 (完整/轻量)
 - WAF1 规则开关
 - WAF2 LLM 配置
-- API 端点设置
 - 数据导出管理
 
 ## API 参考
@@ -179,9 +135,6 @@ docker-compose up -d
 ### WAF1 统计 API
 
 ```bash
-# 获取统计
-GET http://localhost:4000/api/waf1/stats
-
 # 获取仪表盘数据
 GET http://localhost:4000/api/waf1/dashboard
 
@@ -192,31 +145,11 @@ POST http://localhost:4000/api/waf1/reset
 ### WAF2 统计 API
 
 ```bash
-# 获取统计
-GET http://localhost:8081/waf2/stats
-
 # 获取仪表盘数据
 GET http://localhost:8081/waf2/dashboard
 
 # 健康检查
 GET http://localhost:8081/waf2/health
-```
-
-### MCP 工具调用 API
-
-```bash
-# 调用 MCP 工具 (经过 WAF1 检测)
-POST http://localhost:4000/api/servers/tools
-Content-Type: application/json
-
-{
-  "server_name": "rest-api",
-  "tool": "test_request",
-  "arguments": {
-    "method": "GET",
-    "endpoint": "/api/products"
-  }
-}
 ```
 
 ## 测试攻击拦截
@@ -262,44 +195,38 @@ curl -X POST http://localhost:4000/api/servers/tools \
   }'
 ```
 
-## Agent 集成示例
-
-参考 `agent/mcp_agent.py`：
-
-```python
-from mcp_agent import run_agent
-
-# 运行 Agent，所有工具调用都会经过 WAF1 和 WAF2 检测
-run_agent("探测 /rest/user/login 接口的安全性")
-```
-
 ## 项目结构
 
 ```
 mcp-guardrails/
 ├── mcp-hub/                 # MCP Hub + WAF1
 │   ├── src/
-│   │   ├── server.js        # Express 服务器
-│   │   ├── waf1.js          # WAF1 中间件
-│   │   ├── MCPHub.js        # MCP 连接管理
-│   │   └── utils/
+│   │   ├── server.js        # Express 主入口
+│   │   ├── api/             # API 路由模块
+│   │   ├── waf1/            # WAF1 检测模块
+│   │   ├── mcp/             # MCP 协议实现
+│   │   ├── services/        # 核心服务
+│   │   ├── utils/           # 工具模块 (认证、日志等)
+│   │   └── dashboard/       # 前端仪表盘
 │   └── package.json
 ├── waf2/                    # WAF2 LLM 代理
 │   ├── waf2_proxy.py        # FastAPI 代理服务
 │   └── requirements.txt
-├── demo/                    # 演示仪表盘
-│   └── dashboard.html       # 统一安全仪表盘
-├── agent/                   # Agent 示例
-│   └── mcp_agent.py         # MCP Agent 实现
-├── config.example.json      # 配置示例
-├── docker-compose.yml       # Docker 编排
+├── config/                  # 配置文件
+│   ├── guardrails-config.json
+│   └── mcp-servers.json
+├── targets/                 # 内置靶机配置
+│   ├── juice-shop.yml
+│   ├── dvwa.yml
+│   └── webgoat.yml
+├── docker-compose.yml
+├── .env.example
 └── README.md
 ```
 
 ## 技术参考
 
 - [MCP Protocol](https://modelcontextprotocol.io/) - Model Context Protocol 规范
-- [MCP-Guard Paper](https://arxiv.org/abs/xxx) - MCP 安全研究论文
 - [OWASP Top 10](https://owasp.org/www-project-top-ten/) - Web 安全风险
 - [OWASP LLM Top 10](https://owasp.org/www-project-top-10-for-large-language-model-applications/) - LLM 安全风险
 - [MITRE ATT&CK](https://attack.mitre.org/) - 攻击战术技术库
@@ -311,9 +238,3 @@ mcp-guardrails/
 ## 许可证
 
 MIT License
-
-## 致谢
-
-- [MCP Hub](https://github.com/anthropics/mcp) - Anthropic MCP 实现
-- [Juice Shop](https://github.com/juice-shop/juice-shop) - OWASP 漏洞演练平台
-- [cc-switch](https://github.com/farion1231/cc-switch) - UI 设计参考
