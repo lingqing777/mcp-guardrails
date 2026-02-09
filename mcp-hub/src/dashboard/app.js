@@ -924,7 +924,7 @@ async function executeToolTest() {
     }
 
     try {
-        const result = await api.servers.callTool(currentTestTool.name, args);
+        const result = await api.servers.callTool(selectedServer, currentTestTool.name, args);
         outputEl.textContent = JSON.stringify(result, null, 2);
 
         if (result.error || result.isError) {

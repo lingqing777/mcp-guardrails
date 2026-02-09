@@ -496,8 +496,12 @@ export class MCPServerEndpoint {
     let clientInfo
 
 
-    // Setup cleanup on close
+    // Setup cleanup on close - use a flag to prevent recursive calls
+    let isClosing = false;
     const cleanup = async () => {
+      if (isClosing) return;
+      isClosing = true;
+
       this.clients.delete(sessionId);
       try {
         await server.close();
@@ -552,8 +556,12 @@ export class MCPServerEndpoint {
       logger.info(`Streamable HTTP session initialized: ${newSessionId}`);
     };
 
-    // Setup cleanup on close
+    // Setup cleanup on close - use a flag to prevent recursive calls
+    let isClosing = false;
     transport.onclose = async () => {
+      if (isClosing) return;
+      isClosing = true;
+
       const sid = transport._sessionId;
       if (sid) {
         this.streamableClients.delete(sid);
@@ -581,9 +589,15 @@ export class MCPServerEndpoint {
 
   /**
    * Handle MCP messages (POST /messages)
+   * 支持两种情况:
+   * 1. 带 sessionId 参数 - SSE Transport 的消息
+   * 2. 不带 sessionId 但带 Mcp-Session-Id header - Streamable HTTP Transport
+   * 3. 都不带 - 创建新的 Streamable HTTP 会话
    */
   async handleMCPMessage(req, res) {
     const sessionId = req.query.sessionId;
+    const mcpSessionId = req.headers['mcp-session-id'];
+
     function sendErrorResponse(code, error) {
       res.status(code).json({
         jsonrpc: "2.0",
@@ -595,18 +609,27 @@ export class MCPServerEndpoint {
       });
     }
 
-    if (!sessionId) {
-      logger.debug('MCP message received without session ID');
-      return sendErrorResponse(400, new Error('Missing sessionId parameter'));
-    }
-
-    const transportInfo = this.clients.get(sessionId);
-    if (transportInfo) {
-      await transportInfo.transport.handlePostMessage(req, res, req.body);
-    } else {
-      logger.debug(`MCP message for unknown session: ${sessionId}`);
+    // 1. 尝试 SSE Transport (带 query sessionId)
+    if (sessionId) {
+      const transportInfo = this.clients.get(sessionId);
+      if (transportInfo) {
+        await transportInfo.transport.handlePostMessage(req, res, req.body);
+        return;
+      }
+      logger.debug(`MCP message for unknown SSE session: ${sessionId}`);
       return sendErrorResponse(404, new Error(`Session not found: ${sessionId}`));
     }
+
+    // 2. 尝试 Streamable HTTP Transport (带 Mcp-Session-Id header)
+    if (mcpSessionId && this.streamableClients.has(mcpSessionId)) {
+      const { transport } = this.streamableClients.get(mcpSessionId);
+      await transport.handleRequest(req, res, req.body);
+      return;
+    }
+
+    // 3. 没有 session - 创建新的 Streamable HTTP 会话
+    // 这种情况通常是客户端第一次发送 initialize 请求（正常行为）
+    await this.handleStreamableHTTP(req, res);
   }
 
   /**

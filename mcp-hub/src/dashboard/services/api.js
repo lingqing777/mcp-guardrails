@@ -139,15 +139,13 @@ export const serversApi = {
         return request(`${config.waf1Url}/api/servers`);
     },
 
-    async callTool(toolName, args) {
-        return request(`${config.waf1Url}/messages`, {
+    async callTool(serverName, toolName, args) {
+        return request(`${config.waf1Url}/api/tools/call`, {
             method: 'POST',
             body: JSON.stringify({
-                method: 'tools/call',
-                params: {
-                    name: toolName,
-                    arguments: args
-                }
+                server_name: serverName,
+                tool: toolName,
+                arguments: args
             })
         });
     }
