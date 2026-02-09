@@ -65,8 +65,34 @@ start.bat
 
 ### Agent 配置
 
-在你的 AI Agent (Cursor/Claude Desktop 等) 中添加：
+MCP 端点默认需要认证。有两种方式：
 
+**方式1: 使用 API Token（推荐）**
+
+在 `.env` 中设置 Token：
+```bash
+MCP_API_TOKEN=your-secret-token
+```
+
+在 AI Agent (Cursor/Claude Desktop 等) 中配置：
+```json
+{
+  "mcpServers": {
+    "guardrails": {
+      "url": "http://localhost:4000/mcp?token=your-secret-token"
+    }
+  }
+}
+```
+
+**方式2: 禁用认证（仅限本地开发）**
+
+在 `.env` 中设置：
+```bash
+MCP_AUTH_ENABLED=false
+```
+
+然后直接连接：
 ```json
 {
   "mcpServers": {
