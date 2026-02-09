@@ -529,7 +529,7 @@ export class MCPServerEndpoint {
     }
 
     if (!sessionId) {
-      logger.warn('MCP message received without session ID');
+      logger.debug('MCP message received without session ID');
       return sendErrorResponse(400, new Error('Missing sessionId parameter'));
     }
 
@@ -537,7 +537,7 @@ export class MCPServerEndpoint {
     if (transportInfo) {
       await transportInfo.transport.handlePostMessage(req, res, req.body);
     } else {
-      logger.warn(`MCP message for unknown session: ${sessionId}`);
+      logger.debug(`MCP message for unknown session: ${sessionId}`);
       return sendErrorResponse(404, new Error(`Session not found: ${sessionId}`));
     }
   }
