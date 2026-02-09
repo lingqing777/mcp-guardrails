@@ -73,6 +73,8 @@ export class CallChainTracker {
           for (let stepIdx = lastStepIdx - 1; stepIdx >= 0; stepIdx--) {
             if (chain.steps[stepIdx].match(recentCalls[i])) {
               if (stepIdx === 0) {
+                // 检测到危险调用链后，清除历史，防止后续请求持续触发
+                this.history = [];
                 return {
                   detected: true,
                   chain: chain.name,
