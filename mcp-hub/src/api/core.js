@@ -13,6 +13,11 @@ import {
 } from "../utils/errors.js";
 import { EventTypes, HubState } from "../utils/sse-manager.js";
 import logger from "../utils/logger.js";
+import { validateSession, getSessionIdFromRequest } from "../utils/auth.js";
+
+// MCP 认证配置
+const MCP_AUTH_ENABLED = process.env.MCP_AUTH_ENABLED !== 'false';  // 默认启用
+const MCP_API_TOKEN = process.env.MCP_API_TOKEN || null;  // 可选的固定 API Token
 
 /**
  * 注册健康检查路由
@@ -78,11 +83,71 @@ export function registerSSERoute(getServiceManager) {
 }
 
 /**
+ * 验证 MCP 端点的认证
+ * 支持三种认证方式:
+ * 1. 固定 API Token (通过 MCP_API_TOKEN 环境变量设置)
+ * 2. Dashboard Session (Cookie 或 Bearer token)
+ * 3. URL 参数 token
+ */
+function validateMCPAuth(req) {
+  // 如果禁用 MCP 认证，直接通过
+  if (!MCP_AUTH_ENABLED) {
+    return { valid: true };
+  }
+
+  // 从请求中获取 token
+  const authHeader = req.headers.authorization;
+  const urlToken = req.query.token;
+  const sessionId = getSessionIdFromRequest(req);
+
+  // 方式1: 检查固定 API Token
+  if (MCP_API_TOKEN) {
+    if (authHeader === `Bearer ${MCP_API_TOKEN}` || urlToken === MCP_API_TOKEN) {
+      return { valid: true, method: 'api_token' };
+    }
+  }
+
+  // 方式2: 检查 Dashboard Session
+  if (sessionId) {
+    const session = validateSession(sessionId);
+    if (session) {
+      return { valid: true, method: 'session', user: session.username };
+    }
+  }
+
+  // 方式3: 如果没有设置 MCP_API_TOKEN，且禁用了认证也会到这里
+  // 默认情况下不设置 MCP_API_TOKEN 且启用认证时，需要 Session 验证
+  if (!MCP_API_TOKEN && !sessionId) {
+    return {
+      valid: false,
+      error: '需要认证。请设置 MCP_API_TOKEN 环境变量，或先登录 Dashboard 获取 Session'
+    };
+  }
+
+  return { valid: false, error: '认证失败，Token 或 Session 无效' };
+}
+
+/**
  * 注册 MCP 端点路由
  */
 export function registerMCPEndpointRoutes(app, getServiceManager) {
   // MCP SSE 端点
   app.get("/mcp", async (req, res) => {
+    // 验证 MCP 认证
+    const authResult = validateMCPAuth(req);
+    if (!authResult.valid) {
+      logger.warn(`MCP connection rejected: ${authResult.error}`);
+      return res.status(401).json({
+        error: 'Unauthorized',
+        message: authResult.error,
+        hint: '在 .env 中设置 MCP_API_TOKEN，或设置 MCP_AUTH_ENABLED=false 禁用认证'
+      });
+    }
+
+    if (authResult.method) {
+      logger.info(`MCP connection authenticated via ${authResult.method}${authResult.user ? ` (user: ${authResult.user})` : ''}`);
+    }
+
     const serviceManager = getServiceManager();
     try {
       if (!serviceManager?.mcpServerEndpoint) {
@@ -97,7 +162,7 @@ export function registerMCPEndpointRoutes(app, getServiceManager) {
     }
   });
 
-  // MCP 消息端点
+  // MCP 消息端点 - 不需要再次验证，因为 sessionId 已在 SSE 连接时验证
   app.post("/messages", async (req, res) => {
     const serviceManager = getServiceManager();
     try {
@@ -112,6 +177,17 @@ export function registerMCPEndpointRoutes(app, getServiceManager) {
       }
     }
   });
+
+  // 打印 MCP 认证状态
+  if (MCP_AUTH_ENABLED) {
+    if (MCP_API_TOKEN) {
+      logger.info(`[MCP Auth] 已启用 (API Token: ${MCP_API_TOKEN.substring(0, 8)}...)`);
+    } else {
+      logger.info('[MCP Auth] 已启用 (需要 Dashboard Session 或设置 MCP_API_TOKEN)');
+    }
+  } else {
+    logger.warn('[MCP Auth] 已禁用 - MCP 端点无需认证');
+  }
 }
 
 /**

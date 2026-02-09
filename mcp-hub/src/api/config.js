@@ -4,11 +4,20 @@
  */
 
 import fs from "fs";
+import path from "path";
+import { fileURLToPath } from "url";
 
 // ==================== 配置管理 ====================
 
-const CONFIG_FILE = process.env.GUARDRAILS_CONFIG || '/app/guardrails-config.json';
-const WAF2_URL = process.env.WAF2_URL || 'http://waf2:8081';
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+
+// 配置文件路径: 优先环境变量，否则使用相对于项目根目录的路径
+const CONFIG_FILE = process.env.GUARDRAILS_CONFIG ||
+  path.resolve(__dirname, "../../../config/guardrails-config.json");
+
+// WAF2 URL: Docker 环境用 waf2，本地用 localhost:8081
+const WAF2_URL = process.env.WAF2_URL || 'http://localhost:8081';
 
 // 默认配置
 const defaultConfig = {
