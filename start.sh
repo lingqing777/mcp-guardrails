@@ -31,13 +31,13 @@ cd "$SCRIPT_DIR"
 # 创建 .env 文件
 if [ ! -f .env ]; then
     cp .env.example .env
-    echo -e "${YELLOW}已创建 .env 文件，使用默认配置${NC}"
+    echo -e "${YELLOW}已创建 .env 文件，请编辑配置 TARGET_URL 和 QWEN_API_KEY${NC}"
 fi
 
-# 步骤 1: 启动 Docker 服务
+# 步骤 1: 启动 Docker 服务 (WAF2)
 echo ""
-echo -e "${GREEN}[1/3] 启动 Docker 服务 (WAF2 + Juice Shop)...${NC}"
-docker-compose -f docker-compose.yml -f targets/juice-shop.yml up -d --build
+echo -e "${GREEN}[1/3] 启动 WAF2 服务...${NC}"
+docker-compose up -d --build
 
 # 步骤 2: 安装 MCP Hub 依赖
 echo ""
@@ -59,9 +59,8 @@ echo "  Dashboard:    http://localhost:4000"
 echo "  登录账号:     admin / guardrails"
 echo ""
 echo "  WAF2 代理:    http://localhost:8081"
-echo "  Juice Shop:   http://localhost:3000"
 echo ""
-echo "  配置你的 Agent 连接: http://localhost:4000"
+echo "  配置你的 Agent 连接: http://localhost:4000/mcp"
 echo ""
 echo "=========================================="
 echo ""

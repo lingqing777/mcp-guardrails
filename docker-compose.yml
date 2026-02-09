@@ -4,28 +4,24 @@
 #
 #   ┌─────────┐     ┌─────────────────── 宿主机 ───────────────────┐
 #   │  Agent  │────▶│  MCP Hub (WAF1)  ────▶  MCP Server (stdio)  │
-#   │ (Cursor)│     └────────────────────────────┬────────────────┘
+#   │         │     └────────────────────────────┬────────────────┘
 #   └─────────┘                                  │ HTTP
 #                   ┌─────────────── Docker ─────┼────────────────┐
 #                   │                            ▼                │
-#                   │  WAF2 (:8081)  ────▶  目标应用 (:3000)      │
+#                   │  WAF2 (:8081)  ────▶  目标应用 (TARGET_URL) │
 #                   └─────────────────────────────────────────────┘
 #
 # ============================== 快速开始 ==============================
 #
-# 步骤 1: 启动 Docker 服务 (WAF2 + 目标应用)
+# 1. 配置 .env 文件:
+#    - TARGET_URL: 你要保护的目标应用地址
+#    - QWEN_API_KEY: LLM API 密钥 (用于 WAF2 语义分析)
 #
-#   # 使用内置靶机 (Juice Shop)
-#   docker-compose -f docker-compose.yml -f targets/juice-shop.yml up -d
+# 2. 启动服务:
+#    docker-compose up -d
 #
-#   # 或代理到你自己的应用
-#   编辑 .env 设置 TARGET_URL，然后: docker-compose up -d
-#
-# 步骤 2: 启动 MCP Hub (在 mcp-hub 目录)
-#
-#   cd mcp-hub && npm install && npm start
-#
-# 步骤 3: 配置你的 Agent 连接 http://localhost:4000
+# 3. 启动 MCP Hub:
+#    cd mcp-hub && npm install && npm start
 #
 # =====================================================================
 

@@ -1,14 +1,5 @@
 {
-  "_comment": "MCP Server 配置 - REST_BASE_URL 指向 WAF2 代理",
+  "_comment": "MCP Server 配置示例 - 请根据需要修改",
   "mcpServers": {
-    "rest-api": {
-      "displayName": "REST API Tester",
-      "command": "npx",
-      "args": ["-y", "dkmaker-mcp-rest-api"],
-      "env": {
-        "REST_BASE_URL": "http://localhost:8081",
-        "REST_ENABLE_SSL_VERIFY": "false"
-      }
-    }
   }
 }
