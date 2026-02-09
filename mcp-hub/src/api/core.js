@@ -79,9 +79,12 @@ export function registerSSERoute(getServiceManager) {
 
 /**
  * 注册 MCP 端点路由
+ * 支持两种传输方式:
+ * - SSE Transport: GET /mcp 建立 SSE 连接, POST /messages?sessionId=xxx 发送消息
+ * - Streamable HTTP Transport: POST /mcp 直接发送消息 (使用 Mcp-Session-Id header)
  */
 export function registerMCPEndpointRoutes(app, getServiceManager) {
-  // MCP SSE 端点
+  // MCP SSE 端点 (GET /mcp)
   app.get("/mcp", async (req, res) => {
     const serviceManager = getServiceManager();
     try {
@@ -97,7 +100,30 @@ export function registerMCPEndpointRoutes(app, getServiceManager) {
     }
   });
 
-  // MCP 消息端点
+  // MCP Streamable HTTP 端点 (POST /mcp)
+  app.post("/mcp", async (req, res) => {
+    const serviceManager = getServiceManager();
+    try {
+      if (!serviceManager?.mcpServerEndpoint) {
+        throw new ServerError("MCP server endpoint not initialized");
+      }
+      await serviceManager.mcpServerEndpoint.handleStreamableHTTP(req, res);
+    } catch (error) {
+      logger.warn(`Failed to handle MCP Streamable HTTP request: ${error.message}`);
+      if (!res.headersSent) {
+        res.status(500).json({
+          jsonrpc: "2.0",
+          error: {
+            code: -32000,
+            message: error.message || 'Error handling MCP request',
+          },
+          id: null,
+        });
+      }
+    }
+  });
+
+  // MCP SSE 消息端点 (POST /messages) - 用于 SSE Transport
   app.post("/messages", async (req, res) => {
     const serviceManager = getServiceManager();
     try {

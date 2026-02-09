@@ -30,6 +30,8 @@
 
 import { Server } from "@modelcontextprotocol/sdk/server/index.js";
 import { SSEServerTransport } from "@modelcontextprotocol/sdk/server/sse.js";
+import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
+import { randomUUID } from "node:crypto";
 import {
   ListToolsRequestSchema,
   CallToolRequestSchema,
@@ -152,12 +154,19 @@ const CAPABILITY_TYPES = {
 /**
  * MCP Server endpoint that exposes all managed server capabilities
  * This allows standard MCP clients to connect to mcp-hub via MCP protocol
+ *
+ * Supports both:
+ * - SSE Transport: GET /mcp for SSE stream, POST /messages?sessionId=xxx for messages
+ * - Streamable HTTP Transport: POST /mcp with Mcp-Session-Id header
  */
 export class MCPServerEndpoint {
   constructor(mcpHub) {
     this.mcpHub = mcpHub;
     this.clients = new Map(); // sessionId -> { transport, server }
     this.serversMap = new Map(); // sessionId -> server instance
+
+    // Streamable HTTP transports (keyed by session ID)
+    this.streamableClients = new Map(); // sessionId -> { transport, server }
 
     // Store registered capabilities by type
     this.registeredCapabilities = {};
@@ -463,7 +472,7 @@ export class MCPServerEndpoint {
    * Check if there are any active MCP client connections
    */
   hasActiveConnections() {
-    return this.clients.size > 0;
+    return this.clients.size > 0 || this.streamableClients.size > 0;
   }
 
 
@@ -513,6 +522,64 @@ export class MCPServerEndpoint {
   }
 
   /**
+   * Handle Streamable HTTP transport (POST /mcp)
+   * This supports the newer MCP Streamable HTTP transport specification
+   */
+  async handleStreamableHTTP(req, res) {
+    const sessionId = req.headers['mcp-session-id'];
+
+    // If we have a session ID, try to find existing transport
+    if (sessionId && this.streamableClients.has(sessionId)) {
+      const { transport } = this.streamableClients.get(sessionId);
+      await transport.handleRequest(req, res, req.body);
+      return;
+    }
+
+    // Create new Streamable HTTP transport for new sessions
+    const transport = new StreamableHTTPServerTransport({
+      sessionIdGenerator: () => randomUUID(),
+      enableJsonResponse: true,
+    });
+
+    // Create a new server instance for this connection
+    const server = this.createServer();
+
+    let clientInfo;
+
+    // Setup session initialization callback
+    transport._onsessioninitialized = (newSessionId) => {
+      this.streamableClients.set(newSessionId, { transport, server });
+      logger.info(`Streamable HTTP session initialized: ${newSessionId}`);
+    };
+
+    // Setup cleanup on close
+    transport.onclose = async () => {
+      const sid = transport._sessionId;
+      if (sid) {
+        this.streamableClients.delete(sid);
+      }
+      try {
+        await server.close();
+      } catch (error) {
+        logger.warn(`Error closing Streamable HTTP server: ${error.message}`);
+      }
+      logger.info(`'${clientInfo?.name ?? "Unknown"}' Streamable HTTP client disconnected from MCP HUB`);
+    };
+
+    // Connect MCP server to transport
+    await server.connect(transport);
+    server.oninitialized = () => {
+      clientInfo = server.getClientVersion();
+      if (clientInfo) {
+        logger.info(`'${clientInfo.name}' Streamable HTTP client connected to MCP HUB`);
+      }
+    };
+
+    // Handle the initial request
+    await transport.handleRequest(req, res, req.body);
+  }
+
+  /**
    * Handle MCP messages (POST /messages)
    */
   async handleMCPMessage(req, res) {
@@ -553,7 +620,9 @@ export class MCPServerEndpoint {
       }, {});
 
     return {
-      activeClients: this.clients.size,
+      activeClients: this.clients.size + this.streamableClients.size,
+      sseClients: this.clients.size,
+      streamableClients: this.streamableClients.size,
       registeredCapabilities: capabilityCounts,
       totalCapabilities: Object.values(capabilityCounts).reduce((sum, count) => sum + count, 0),
     };
@@ -563,16 +632,26 @@ export class MCPServerEndpoint {
    * Close all transports and cleanup
    */
   async close() {
-    // Close all servers (which will close their transports)
+    // Close all SSE servers (which will close their transports)
     for (const [sessionId, { server }] of this.clients) {
       try {
         await server.close();
       } catch (error) {
-        logger.debug(`Error closing server ${sessionId}: ${error.message}`);
+        logger.debug(`Error closing SSE server ${sessionId}: ${error.message}`);
+      }
+    }
+
+    // Close all Streamable HTTP servers
+    for (const [sessionId, { server }] of this.streamableClients) {
+      try {
+        await server.close();
+      } catch (error) {
+        logger.debug(`Error closing Streamable HTTP server ${sessionId}: ${error.message}`);
       }
     }
 
     this.clients.clear();
+    this.streamableClients.clear();
 
     // Clear all registered capabilities
     Object.values(this.registeredCapabilities).forEach(map => map.clear());
