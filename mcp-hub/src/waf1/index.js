@@ -18,6 +18,7 @@
  *   - stats.js              - 统计与仪表盘
  */
 
+import logger from '../utils/logger.js';
 import { detectSecrets, detectPII, detectUnicodeAnomalies, detectFuzzyAttacks } from './detectors/index.js';
 import { checkRules, checkWhitelist, RULES, DEFAULT_RULES_ENABLED } from './rules.js';
 import { CallChainTracker } from './call-chain.js';
@@ -76,7 +77,7 @@ let config = {
 
 export function setWaf1Enabled(enabled) {
   waf1Enabled = enabled;
-  console.log(`[WAF1] 状态切换: ${enabled ? '启用' : '禁用'}`);
+  logger.info(`[WAF1] 状态切换: ${enabled ? '启用' : '禁用'}`);
 }
 
 export function isWaf1Enabled() {
@@ -106,7 +107,7 @@ export function updateWaf1Config(newConfig) {
       config.enabled = newConfig.waf1.enabled;
     }
 
-    console.log("[WAF1] 配置已更新, rulesEnabled:", config.rulesEnabled);
+    logger.info("[WAF1] 配置已更新, rulesEnabled:", config.rulesEnabled);
   }
 }
 
@@ -240,14 +241,14 @@ export function waf1Middleware(req, res, next) {
   stats.recordRequest();
   const startTime = Date.now();
 
-  console.log(`[WAF1] ── 检测请求: ${req.path} (${checkTarget || 'unknown'}) ──`);
+  logger.info(`[WAF1] ── 检测请求: ${req.path} (${checkTarget || 'unknown'}) ──`);
 
   // Stage -1: 速率限制
   const clientId = req.headers['x-user-id'] || req.ip || 'unknown';
   const rateLimitResult = rateLimiter.check(clientId);
   if (!rateLimitResult.allowed) {
     stats.recordBlock('rateLimit');
-    console.log(`[WAF1] ❌ 速率限制: ${rateLimitResult.reason}`);
+    logger.warn(`[WAF1] ❌ 速率限制: ${rateLimitResult.reason}`);
     return res.status(429).json({
       error: "WAF1 拦截",
       ...rateLimitResult,
@@ -259,7 +260,7 @@ export function waf1Middleware(req, res, next) {
   const rbacResult = rbacController.check(userId, checkTarget);
   if (!rbacResult.allowed) {
     stats.recordBlock('detector', 'rbac');
-    console.log(`[WAF1] ❌ RBAC 拒绝: ${rbacResult.reason}`);
+    logger.warn(`[WAF1] ❌ RBAC 拒绝: ${rbacResult.reason}`);
     return res.status(403).json({
       error: "WAF1 拦截",
       ...rbacResult,
@@ -270,7 +271,7 @@ export function waf1Middleware(req, res, next) {
   const whitelistResult = checkWhitelist(checkTarget, config.whitelist);
   if (!whitelistResult.allowed) {
     stats.recordBlock('tool');
-    console.log(`[WAF1] ❌ 白名单拦截: ${whitelistResult.reason}`);
+    logger.warn(`[WAF1] ❌ 白名单拦截: ${whitelistResult.reason}`);
     return res.status(403).json({
       error: "WAF1 拦截",
       ...whitelistResult,
@@ -282,7 +283,7 @@ export function waf1Middleware(req, res, next) {
   if (!ruleResult.allowed) {
     stats.recordBlock('rule', ruleResult.category);
     stats.addDetection({ tool: checkTarget, stage: 'rules', ...ruleResult });
-    console.log(`[WAF1] ❌ 规则拦截: ${ruleResult.reason}`);
+    logger.warn(`[WAF1] ❌ 规则拦截: ${ruleResult.reason}`);
     return res.status(403).json({
       error: "WAF1 拦截",
       ...ruleResult,
@@ -303,8 +304,8 @@ export function waf1Middleware(req, res, next) {
       allDetections: blocked.map(b => ({ detector: b.detector, reason: b.reason })),
     });
 
-    console.log(`[WAF1] ❌ 检测器拦截 [${primary.detector}]: ${primary.reason}`);
-    blocked.slice(1).forEach(b => console.log(`[WAF1]    + [${b.detector}]: ${b.reason}`));
+    logger.warn(`[WAF1] ❌ 检测器拦截 [${primary.detector}]: ${primary.reason}`);
+    blocked.slice(1).forEach(b => logger.warn(`[WAF1]    + [${b.detector}]: ${b.reason}`));
 
     return res.status(403).json({
       error: "WAF1 拦截",
@@ -317,7 +318,7 @@ export function waf1Middleware(req, res, next) {
 
   const elapsed = Date.now() - startTime;
   stats.recordPass();
-  console.log(`[WAF1] ✅ 放行: ${checkTarget} (${elapsed}ms)`);
+  logger.info(`[WAF1] ✅ 放行: ${checkTarget} (${elapsed}ms)`);
   next();
 }
 

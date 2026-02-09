@@ -196,7 +196,7 @@ export class MCPHub extends EventEmitter {
             await this.stopServer(name, true)
             logger.info(`Server '${name}' disabled`)
           } else {
-            await this.startServer(name, serverConfig);
+            await this.startServer(name);
             logger.info(`Server '${name}' enabled`)
           }
         } else {
