@@ -1793,3 +1793,34 @@
         .server-meta {
             margin-top: 8px;
         }
+
+        /* Server 错误样式 */
+        .server-list-item.has-error {
+            border-left: 3px solid #ff4757;
+        }
+
+        .server-list-item .error-hint {
+            color: #ff4757;
+            font-size: 11px;
+        }
+
+        .error-banner {
+            background: rgba(255, 71, 87, 0.15);
+            border: 1px solid rgba(255, 71, 87, 0.3);
+            border-radius: 8px;
+            padding: 12px 16px;
+            margin: 12px 0;
+            color: #ff6b7a;
+            font-size: 13px;
+            word-break: break-all;
+        }
+
+        .error-banner strong {
+            color: #ff4757;
+        }
+
+        .server-status.error,
+        .server-status.disconnected {
+            background: rgba(255, 71, 87, 0.2);
+            color: #ff4757;
+        }

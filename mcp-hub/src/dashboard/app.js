@@ -683,7 +683,7 @@ function renderServersList() {
     const container = document.getElementById('servers-list');
 
     if (!mcpServers || mcpServers.length === 0) {
-        container.innerHTML = '<div class="empty-state">暂无 MCP Server</div>';
+        container.innerHTML = '<div class="empty-state">暂无 MCP Server<br><small style="color:#666">点击 + 添加</small></div>';
         return;
     }
 
@@ -691,15 +691,20 @@ function renderServersList() {
         const tools = server.capabilities?.tools || [];
         const resources = server.capabilities?.resources || [];
         const isSelected = selectedServer?.name === server.name;
+        const hasError = server.status === 'error' || server.status === 'disconnected';
+        const errorMsg = server.error ? escapeHtml(server.error.substring(0, 50)) : '';
 
         return `
-            <div class="server-list-item ${isSelected ? 'selected' : ''}"
-                 onclick="selectServer('${escapeHtml(server.name)}')">
+            <div class="server-list-item ${isSelected ? 'selected' : ''} ${hasError ? 'has-error' : ''}"
+                 onclick="selectServer('${escapeHtml(server.name)}')"
+                 title="${errorMsg || server.status}">
                 <div class="name">
                     ${escapeHtml(server.displayName || server.name)}
                     <span class="server-status ${server.status}">${server.status}</span>
                 </div>
-                <div class="meta">${tools.length} tools, ${resources.length} resources</div>
+                <div class="meta">
+                    ${hasError && errorMsg ? `<span class="error-hint">${errorMsg}...</span>` : `${tools.length} tools, ${resources.length} resources`}
+                </div>
             </div>
         `;
     }).join('');
@@ -733,6 +738,24 @@ function renderServerDetail() {
     document.getElementById('detail-version').textContent = selectedServer.serverInfo?.version || '-';
     document.getElementById('detail-uptime').textContent = selectedServer.uptime ? formatUptime(selectedServer.uptime) : '-';
     document.getElementById('detail-transport').textContent = selectedServer.transportType || 'stdio';
+
+    // 显示错误信息
+    const errorBanner = document.getElementById('server-error-banner');
+    if (selectedServer.error) {
+        if (!errorBanner) {
+            // 动态创建错误横幅
+            const banner = document.createElement('div');
+            banner.id = 'server-error-banner';
+            banner.className = 'error-banner';
+            banner.innerHTML = `<strong>启动失败:</strong> <span id="server-error-msg"></span>`;
+            const header = detailEl.querySelector('.server-header');
+            header.parentNode.insertBefore(banner, header.nextSibling);
+        }
+        document.getElementById('server-error-msg').textContent = selectedServer.error;
+        document.getElementById('server-error-banner').style.display = 'block';
+    } else if (errorBanner) {
+        errorBanner.style.display = 'none';
+    }
 
     renderToolsList();
     renderResourcesList();
