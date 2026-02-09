@@ -111,17 +111,23 @@
                 <div class="inspector-sidebar">
                     <div class="sidebar-header">
                         <span>MCP Servers</span>
-                        <button class="icon-btn" onclick="fetchMcpServers()" title="刷新">&#8635;</button>
+                        <div style="display: flex; gap: 4px;">
+                            <button class="icon-btn" onclick="openAddServerModal()" title="添加 Server">+</button>
+                            <button class="icon-btn" onclick="fetchMcpServers()" title="刷新">&#8635;</button>
+                        </div>
                     </div>
                     <div class="server-list" id="servers-list">
                         <div class="empty-state">正在加载...</div>
+                    </div>
+                    <div class="sidebar-footer" style="padding: 12px; border-top: 1px solid #333; font-size: 11px; color: #666;">
+                        配置文件路径: <span id="mcp-config-path">-</span>
                     </div>
                 </div>
 
                 <!-- 右侧：Server 详情 -->
                 <div class="inspector-main">
                     <div id="server-detail-empty" class="empty-state" style="padding: 60px;">
-                        选择一个 MCP Server 查看详情
+                        选择一个 MCP Server 查看详情，或点击 + 添加新 Server
                     </div>
 
                     <div id="server-detail" style="display: none;">
@@ -131,11 +137,15 @@
                                 <span id="detail-server-name">-</span>
                                 <span class="server-status" id="detail-server-status">-</span>
                             </div>
-                            <div class="server-meta">
-                                <span>版本: <span id="detail-version">-</span></span>
-                                <span>运行时间: <span id="detail-uptime">-</span></span>
-                                <span>传输: <span id="detail-transport">-</span></span>
+                            <div class="server-actions" style="display: flex; gap: 8px;">
+                                <button class="btn btn-secondary btn-sm" onclick="editCurrentServer()">编辑</button>
+                                <button class="btn btn-danger btn-sm" onclick="deleteCurrentServer()">删除</button>
                             </div>
+                        </div>
+                        <div class="server-meta">
+                            <span>版本: <span id="detail-version">-</span></span>
+                            <span>运行时间: <span id="detail-uptime">-</span></span>
+                            <span>传输: <span id="detail-transport">-</span></span>
                         </div>
 
                         <!-- Inspector 风格的子标签 -->
@@ -143,6 +153,7 @@
                             <div class="inspector-tab active" data-stab="tools">Tools</div>
                             <div class="inspector-tab" data-stab="resources">Resources</div>
                             <div class="inspector-tab" data-stab="prompts">Prompts</div>
+                            <div class="inspector-tab" data-stab="config">配置</div>
                         </div>
 
                         <!-- Tools 面板 -->
@@ -165,6 +176,13 @@
                                 <div class="empty-state">暂无提示词模板</div>
                             </div>
                         </div>
+
+                        <!-- 配置面板 -->
+                        <div id="stab-config" class="inspector-tab-content" style="display: none;">
+                            <div class="config-preview" id="server-config-preview">
+                                <pre style="background: #1a1a1a; padding: 16px; border-radius: 8px; overflow: auto; max-height: 400px;"><code id="server-config-json">-</code></pre>
+                            </div>
+                        </div>
                     </div>
                 </div>
             </div>
@@ -184,6 +202,78 @@
                 <div class="test-result" id="test-result">
                     <div class="result-label">响应结果</div>
                     <pre id="test-output">等待执行...</pre>
+                </div>
+            </div>
+        </div>
+
+        <!-- 添加/编辑 Server 模态框 -->
+        <div id="server-modal" class="modal" style="display: none;">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h3 id="server-modal-title">添加 MCP Server</h3>
+                    <button class="icon-btn" onclick="closeServerModal()">✕</button>
+                </div>
+                <div class="modal-body">
+                    <div class="form-group">
+                        <label>Server 名称 <span class="required">*</span></label>
+                        <input type="text" id="server-name" placeholder="例如: rest-api, filesystem">
+                        <div class="hint">唯一标识符，用于配置和日志</div>
+                    </div>
+
+                    <div class="form-group">
+                        <label>显示名称</label>
+                        <input type="text" id="server-display-name" placeholder="例如: REST API Tester">
+                        <div class="hint">在 Dashboard 中显示的名称</div>
+                    </div>
+
+                    <div class="form-group">
+                        <label>Server 类型 <span class="required">*</span></label>
+                        <div class="type-selector">
+                            <div class="type-option selected" data-type="stdio" onclick="selectServerType('stdio')">
+                                <strong>STDIO</strong>
+                                <span>本地命令行运行</span>
+                            </div>
+                            <div class="type-option" data-type="sse" onclick="selectServerType('sse')">
+                                <strong>SSE</strong>
+                                <span>远程 HTTP 连接</span>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- STDIO 配置 -->
+                    <div id="stdio-config">
+                        <div class="form-group">
+                            <label>命令 <span class="required">*</span></label>
+                            <input type="text" id="server-command" placeholder="例如: npx, node, python">
+                        </div>
+                        <div class="form-group">
+                            <label>参数</label>
+                            <input type="text" id="server-args" placeholder='例如: -y, @anthropic/mcp-server-filesystem'>
+                            <div class="hint">多个参数用逗号分隔</div>
+                        </div>
+                        <div class="form-group">
+                            <label>环境变量</label>
+                            <textarea id="server-env" rows="3" placeholder='{"REST_BASE_URL": "http://localhost:8081"}'></textarea>
+                            <div class="hint">JSON 格式的环境变量</div>
+                        </div>
+                    </div>
+
+                    <!-- SSE 配置 -->
+                    <div id="sse-config" style="display: none;">
+                        <div class="form-group">
+                            <label>URL <span class="required">*</span></label>
+                            <input type="text" id="server-url" placeholder="例如: http://localhost:3000/sse">
+                        </div>
+                        <div class="form-group">
+                            <label>Headers</label>
+                            <textarea id="server-headers" rows="3" placeholder='{"Authorization": "Bearer xxx"}'></textarea>
+                            <div class="hint">JSON 格式的 HTTP Headers</div>
+                        </div>
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button class="btn btn-secondary" onclick="closeServerModal()">取消</button>
+                    <button class="btn btn-primary" onclick="saveServer()">保存</button>
                 </div>
             </div>
         </div>

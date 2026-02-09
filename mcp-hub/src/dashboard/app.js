@@ -643,10 +643,30 @@ function exportLogs() {
 
 // ==================== MCP Server 管理 ====================
 
+// 存储 MCP Server 配置
+let mcpServerConfigs = [];
+let editingServerName = null;  // 正在编辑的 Server 名称
+
 async function fetchMcpServers() {
     try {
+        // 获取运行时状态
         const data = await api.servers.list();
         mcpServers = data.servers || [];
+
+        // 获取配置信息
+        try {
+            const configData = await api.mcpConfig.listServers();
+            mcpServerConfigs = configData.servers || [];
+            // 更新配置路径显示
+            const pathEl = document.getElementById('mcp-config-path');
+            if (pathEl && configData.configPath) {
+                pathEl.textContent = configData.configPath;
+            }
+        } catch (e) {
+            console.log('获取 MCP 配置失败:', e);
+            mcpServerConfigs = [];
+        }
+
         renderServersList();
         if (selectedServer) {
             selectedServer = mcpServers.find(s => s.name === selectedServer.name);
@@ -938,3 +958,188 @@ window.selectServer = selectServer;
 window.openToolTest = openToolTest;
 window.closeToolTest = closeToolTest;
 window.executeToolTest = executeToolTest;
+
+// MCP Server 配置管理
+window.openAddServerModal = openAddServerModal;
+window.closeServerModal = closeServerModal;
+window.selectServerType = selectServerType;
+window.saveServer = saveServer;
+window.editCurrentServer = editCurrentServer;
+window.deleteCurrentServer = deleteCurrentServer;
+
+// ==================== MCP Server 配置 CRUD ====================
+
+function openAddServerModal() {
+    editingServerName = null;
+    document.getElementById('server-modal-title').textContent = '添加 MCP Server';
+    document.getElementById('server-name').value = '';
+    document.getElementById('server-name').disabled = false;
+    document.getElementById('server-display-name').value = '';
+    document.getElementById('server-command').value = '';
+    document.getElementById('server-args').value = '';
+    document.getElementById('server-env').value = '';
+    document.getElementById('server-url').value = '';
+    document.getElementById('server-headers').value = '';
+    selectServerType('stdio');
+    document.getElementById('server-modal').style.display = 'flex';
+}
+
+function closeServerModal() {
+    document.getElementById('server-modal').style.display = 'none';
+    editingServerName = null;
+}
+
+function selectServerType(type) {
+    document.querySelectorAll('.type-option').forEach(opt => {
+        opt.classList.toggle('selected', opt.dataset.type === type);
+    });
+    document.getElementById('stdio-config').style.display = type === 'stdio' ? 'block' : 'none';
+    document.getElementById('sse-config').style.display = type === 'sse' ? 'block' : 'none';
+}
+
+async function saveServer() {
+    const name = document.getElementById('server-name').value.trim();
+    const displayName = document.getElementById('server-display-name').value.trim();
+    const selectedType = document.querySelector('.type-option.selected')?.dataset.type || 'stdio';
+
+    if (!name) {
+        alert('请输入 Server 名称');
+        return;
+    }
+
+    let serverConfig = {};
+
+    if (displayName) {
+        serverConfig.displayName = displayName;
+    }
+
+    if (selectedType === 'stdio') {
+        const command = document.getElementById('server-command').value.trim();
+        const argsStr = document.getElementById('server-args').value.trim();
+        const envStr = document.getElementById('server-env').value.trim();
+
+        if (!command) {
+            alert('请输入命令');
+            return;
+        }
+
+        serverConfig.command = command;
+
+        if (argsStr) {
+            serverConfig.args = argsStr.split(',').map(s => s.trim()).filter(s => s);
+        }
+
+        if (envStr) {
+            try {
+                serverConfig.env = JSON.parse(envStr);
+            } catch (e) {
+                alert('环境变量 JSON 格式无效');
+                return;
+            }
+        }
+    } else {
+        const url = document.getElementById('server-url').value.trim();
+        const headersStr = document.getElementById('server-headers').value.trim();
+
+        if (!url) {
+            alert('请输入 URL');
+            return;
+        }
+
+        serverConfig.url = url;
+
+        if (headersStr) {
+            try {
+                serverConfig.headers = JSON.parse(headersStr);
+            } catch (e) {
+                alert('Headers JSON 格式无效');
+                return;
+            }
+        }
+    }
+
+    try {
+        if (editingServerName) {
+            // 更新
+            await api.mcpConfig.updateServer(editingServerName, serverConfig);
+            alert(`Server '${editingServerName}' 已更新，配置将在几秒后生效`);
+        } else {
+            // 添加
+            await api.mcpConfig.addServer(name, serverConfig);
+            alert(`Server '${name}' 已添加，配置将在几秒后生效`);
+        }
+
+        closeServerModal();
+        // 等待配置重新加载后刷新
+        setTimeout(() => fetchMcpServers(), 1000);
+    } catch (e) {
+        const errMsg = e.data?.error || e.message;
+        alert('保存失败: ' + errMsg);
+    }
+}
+
+function editCurrentServer() {
+    if (!selectedServer) return;
+
+    const serverConfig = mcpServerConfigs.find(s => s.name === selectedServer.name);
+    if (!serverConfig) {
+        alert('无法获取 Server 配置');
+        return;
+    }
+
+    editingServerName = selectedServer.name;
+    document.getElementById('server-modal-title').textContent = '编辑 MCP Server';
+    document.getElementById('server-name').value = selectedServer.name;
+    document.getElementById('server-name').disabled = true;  // 不允许修改名称
+    document.getElementById('server-display-name').value = serverConfig.displayName || '';
+
+    if (serverConfig.command) {
+        selectServerType('stdio');
+        document.getElementById('server-command').value = serverConfig.command || '';
+        document.getElementById('server-args').value = (serverConfig.args || []).join(', ');
+        document.getElementById('server-env').value = serverConfig.env ? JSON.stringify(serverConfig.env, null, 2) : '';
+    } else if (serverConfig.url) {
+        selectServerType('sse');
+        document.getElementById('server-url').value = serverConfig.url || '';
+        document.getElementById('server-headers').value = serverConfig.headers ? JSON.stringify(serverConfig.headers, null, 2) : '';
+    }
+
+    document.getElementById('server-modal').style.display = 'flex';
+}
+
+async function deleteCurrentServer() {
+    if (!selectedServer) return;
+
+    if (!confirm(`确定要删除 Server '${selectedServer.name}' 吗？`)) {
+        return;
+    }
+
+    try {
+        await api.mcpConfig.deleteServer(selectedServer.name);
+        alert(`Server '${selectedServer.name}' 已删除`);
+        selectedServer = null;
+        setTimeout(() => fetchMcpServers(), 1000);
+    } catch (e) {
+        const errMsg = e.data?.error || e.message;
+        alert('删除失败: ' + errMsg);
+    }
+}
+
+// 更新 renderServerDetail 以显示配置信息
+const originalRenderServerDetail = renderServerDetail;
+function renderServerDetailWithConfig() {
+    originalRenderServerDetail();
+
+    // 显示配置 JSON
+    if (selectedServer) {
+        const serverConfig = mcpServerConfigs.find(s => s.name === selectedServer.name);
+        const configJsonEl = document.getElementById('server-config-json');
+        if (configJsonEl && serverConfig) {
+            const { config_source, type, ...cleanConfig } = serverConfig;
+            configJsonEl.textContent = JSON.stringify(cleanConfig, null, 2);
+        }
+    }
+}
+
+// 替换原函数
+window.renderServerDetail = renderServerDetailWithConfig;

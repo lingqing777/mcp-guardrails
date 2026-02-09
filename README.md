@@ -8,7 +8,7 @@
 
 - **WAF1** - MCP 协议层静态规则检测
 - **WAF2** - HTTP 流量层 LLM 语义分析
-- **Dashboard** - 安全事件可视化仪表盘
+- **Dashboard** - 安全事件可视化仪表盘 + 配置管理
 
 ## 架构
 
@@ -34,13 +34,6 @@
 └─────────────────────────────────────────────────────────────────────────┘
 ```
 
-## 双层 WAF
-
-| 层级 | 位置 | 检测方式 | 检测内容 |
-|------|------|----------|----------|
-| **WAF1** | MCP Hub | 静态正则规则 | SQL注入、命令注入、XSS、路径遍历、敏感文件、密钥泄露、PII |
-| **WAF2** | Docker 代理 | LLM 语义分析 | 攻击意图识别、响应数据泄露、OWASP分类、MITRE ATT&CK映射 |
-
 ## 快速开始
 
 ### 前置要求
@@ -48,40 +41,7 @@
 - Docker & Docker Compose
 - Node.js >= 18
 
-### 配置
-
-1. 复制环境变量文件：
-```bash
-cp .env.example .env
-```
-
-2. 编辑 `.env` 配置：
-```bash
-# 你要保护的目标应用地址
-TARGET_URL=http://your-app:3000
-
-# LLM API 密钥 (用于 WAF2 语义分析)
-QWEN_API_KEY=sk-your-api-key
-```
-
-3. 配置 MCP Server（编辑 `config/mcp-servers.json`）：
-```json
-{
-  "mcpServers": {
-    "your-server": {
-      "command": "npx",
-      "args": ["-y", "your-mcp-server"],
-      "env": {
-        "BASE_URL": "http://localhost:8081"
-      }
-    }
-  }
-}
-```
-
-> **重要：** MCP Server 的 HTTP 请求需指向 WAF2 代理 (`:8081`)，流量会经过安全检测后转发到目标应用。
-
-### 启动
+### 一键启动
 
 ```bash
 # Linux / macOS
@@ -91,30 +51,21 @@ QWEN_API_KEY=sk-your-api-key
 start.bat
 ```
 
-### 手动启动
+### 配置（全部在 Dashboard 完成）
 
-```bash
-# 1. 启动 WAF2
-docker-compose up -d
+1. 打开 Dashboard: **http://localhost:4000**
+2. 登录: `admin` / `guardrails`
+3. 在 **「配置」** 页面设置:
+   - 目标应用 URL
+   - LLM API Key (Qwen DashScope)
+4. 在 **「MCP Servers」** 页面添加你的 MCP Server
+5. 配置你的 Agent 连接到 MCP Hub
 
-# 2. 启动 MCP Hub
-cd mcp-hub && npm install
-node ./src/utils/cli.js --port 4000 --config ../config/mcp-servers.json
-```
-
-### 访问
-
-| 服务 | 地址 |
-|------|------|
-| Dashboard | http://localhost:4000 |
-| MCP Endpoint | http://localhost:4000/mcp |
-| WAF2 代理 | http://localhost:8081 |
-
-**登录：** `admin` / `guardrails`
+**就这么简单！**
 
 ### Agent 配置
 
-在你的 AI Agent 中配置连接到 MCP Hub：
+在你的 AI Agent (Cursor/Claude Desktop 等) 中添加：
 
 ```json
 {
@@ -125,6 +76,21 @@ node ./src/utils/cli.js --port 4000 --config ../config/mcp-servers.json
   }
 }
 ```
+
+## 双层 WAF
+
+| 层级 | 位置 | 检测方式 | 检测内容 |
+|------|------|----------|----------|
+| **WAF1** | MCP Hub | 静态正则规则 | SQL注入、命令注入、XSS、路径遍历、敏感文件 |
+| **WAF2** | Docker 代理 | LLM 语义分析 | 攻击意图识别、响应数据泄露、OWASP分类 |
+
+## 服务端口
+
+| 服务 | 地址 |
+|------|------|
+| Dashboard | http://localhost:4000 |
+| MCP Endpoint | http://localhost:4000/mcp |
+| WAF2 代理 | http://localhost:8081 |
 
 ## 项目结构
 

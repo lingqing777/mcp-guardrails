@@ -153,6 +153,56 @@ export const serversApi = {
     }
 };
 
+// ==================== MCP Server 配置管理 API ====================
+
+export const mcpConfigApi = {
+    // 获取所有 MCP Server 配置
+    async listServers() {
+        return request(`${config.waf1Url}/api/mcp-config/servers`);
+    },
+
+    // 获取单个 MCP Server 配置
+    async getServer(name) {
+        return request(`${config.waf1Url}/api/mcp-config/servers/${encodeURIComponent(name)}`);
+    },
+
+    // 添加新的 MCP Server
+    async addServer(name, serverConfig) {
+        return request(`${config.waf1Url}/api/mcp-config/servers`, {
+            method: 'POST',
+            body: JSON.stringify({ name, ...serverConfig })
+        });
+    },
+
+    // 更新 MCP Server 配置
+    async updateServer(name, serverConfig) {
+        return request(`${config.waf1Url}/api/mcp-config/servers/${encodeURIComponent(name)}`, {
+            method: 'PUT',
+            body: JSON.stringify(serverConfig)
+        });
+    },
+
+    // 删除 MCP Server
+    async deleteServer(name) {
+        return request(`${config.waf1Url}/api/mcp-config/servers/${encodeURIComponent(name)}`, {
+            method: 'DELETE'
+        });
+    },
+
+    // 导入配置
+    async importServers(servers, merge = true) {
+        return request(`${config.waf1Url}/api/mcp-config/import`, {
+            method: 'POST',
+            body: JSON.stringify({ servers, merge })
+        });
+    },
+
+    // 导出配置
+    async exportServers() {
+        return request(`${config.waf1Url}/api/mcp-config/export`);
+    }
+};
+
 // ==================== 配置管理 ====================
 
 export function getConfig() {
@@ -182,6 +232,7 @@ export default {
     waf2: waf2Api,
     config: configApi,
     servers: serversApi,
+    mcpConfig: mcpConfigApi,
     getConfig,
     setConfig
 };

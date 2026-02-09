@@ -46,6 +46,7 @@ import {
   registerMarketplaceRoutes,
   registerWorkspacesRoute,
   registerRestartRoutes,
+  registerMcpConfigRoutes,
 } from "./api/index.js";
 
 // WAF1 中间件
@@ -187,6 +188,9 @@ registerConfigRoutes(app, getConfig, setConfig, applyWaf1Config, updateWaf1Confi
 
 // WAF1 仪表盘 API (在 waf1Middleware 之前，避免被拦截)
 registerWaf1Routes(app, getConfig, setConfig, saveGuardrailsConfig, applyWaf1Config);
+
+// MCP Server 配置管理 API (CRUD)
+registerMcpConfigRoutes(app);
 
 // WAF1 中间件 (在 WAF1 API 之后，其他路由之前)
 app.use("/api", waf1Middleware);

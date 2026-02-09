@@ -28,10 +28,9 @@ fi
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 cd "$SCRIPT_DIR"
 
-# 创建 .env 文件
+# 创建 .env 文件 (可选，Dashboard 中也可配置)
 if [ ! -f .env ]; then
-    cp .env.example .env
-    echo -e "${YELLOW}已创建 .env 文件，请编辑配置 TARGET_URL 和 QWEN_API_KEY${NC}"
+    cp .env.example .env 2>/dev/null || true
 fi
 
 # 步骤 1: 启动 Docker 服务 (WAF2)
@@ -58,9 +57,11 @@ echo ""
 echo "  Dashboard:    http://localhost:4000"
 echo "  登录账号:     admin / guardrails"
 echo ""
-echo "  WAF2 代理:    http://localhost:8081"
+echo "  在 Dashboard 中完成所有配置:"
+echo "  - 配置页面: 设置目标URL和API Key"
+echo "  - MCP Servers页面: 添加你的MCP Server"
 echo ""
-echo "  配置你的 Agent 连接: http://localhost:4000/mcp"
+echo "  Agent 连接地址: http://localhost:4000/mcp"
 echo ""
 echo "=========================================="
 echo ""

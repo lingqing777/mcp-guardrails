@@ -14,3 +14,4 @@ export {
   registerWorkspacesRoute,
   registerRestartRoutes
 } from './core.js';
+export { registerMcpConfigRoutes } from './mcp-config.js';

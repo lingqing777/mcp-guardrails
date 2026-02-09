@@ -1,5 +1,3 @@
 {
-  "_comment": "MCP Server 配置示例 - 请根据需要修改",
-  "mcpServers": {
-  }
+  "mcpServers": {}
 }
