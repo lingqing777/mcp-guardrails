@@ -1,21 +1,14 @@
 {
-  "_comment": "用户 MCP Server 配置文件 - 在此配置你自己的 MCP Server",
-  "_usage": "MCP Hub 会连接这些 Server，Agent 通过 MCP Hub 访问它们",
-  "_note": "你的 MCP Server 如需发送 HTTP 请求到目标应用，请配置 REST_BASE_URL=http://localhost:8081 (WAF2代理)",
+  "_comment": "MCP Server 配置 - REST_BASE_URL 指向 WAF2 代理",
   "mcpServers": {
-    "_example_stdio": {
-      "_comment": "示例: stdio 类型的 MCP Server",
-      "displayName": "My Stdio Server",
-      "command": "node",
-      "args": ["/path/to/your/mcp-server/index.js"],
-      "disabled": true
-    },
-    "_example_http": {
-      "_comment": "示例: HTTP 类型的 MCP Server",
-      "displayName": "My HTTP Server",
-      "transportType": "http",
-      "url": "http://your-mcp-server:3000",
-      "disabled": true
+    "rest-api": {
+      "displayName": "REST API Tester",
+      "command": "npx",
+      "args": ["-y", "dkmaker-mcp-rest-api"],
+      "env": {
+        "REST_BASE_URL": "http://localhost:8081",
+        "REST_ENABLE_SSL_VERIFY": "false"
+      }
     }
   }
 }

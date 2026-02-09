@@ -1,37 +1,36 @@
-# MCP Guardrails - MCP 安全网关 (WAF1 + WAF2)
+# MCP Guardrails - MCP 安全网关
 #
 # ============================== 架构说明 ==============================
 #
-#   用户提供:
-#     - Agent (Cursor/Claude Code) - 连接到 MCP Hub
-#     - MCP Server (用户自己的) - 在 config/mcp-servers.json 中配置
-#     - 目标 Web 应用 - MCP Server 要访问的应用
-#
-#   我们提供:
-#     - MCP Hub (WAF1) - MCP 协议层安全检测
-#     - WAF2 - HTTP 流量层 LLM 动态检测
-#
-#   数据流:
-#     Agent → MCP Hub (4000) → 用户的 MCP Server → WAF2 (8081) → 目标应用
-#             ↑ WAF1 检测                          ↑ WAF2 检测
+#   ┌─────────┐     ┌─────────────────── 宿主机 ───────────────────┐
+#   │  Agent  │────▶│  MCP Hub (WAF1)  ────▶  MCP Server (stdio)  │
+#   │ (Cursor)│     └────────────────────────────┬────────────────┘
+#   └─────────┘                                  │ HTTP
+#                   ┌─────────────── Docker ─────┼────────────────┐
+#                   │                            ▼                │
+#                   │  WAF2 (:8081)  ────▶  目标应用 (:3000)      │
+#                   └─────────────────────────────────────────────┘
 #
 # ============================== 快速开始 ==============================
 #
-# 【场景A】代理到你自己的应用
+# 步骤 1: 启动 Docker 服务 (WAF2 + 目标应用)
 #
-#   1. cp .env.example .env
-#   2. 编辑 .env 中的 TARGET_URL (本机/内网/外网均可)
-#   3. docker-compose up -d
-#
-# 【场景B】使用内置靶机
-#
+#   # 使用内置靶机 (Juice Shop)
 #   docker-compose -f docker-compose.yml -f targets/juice-shop.yml up -d
+#
+#   # 或代理到你自己的应用
+#   编辑 .env 设置 TARGET_URL，然后: docker-compose up -d
+#
+# 步骤 2: 启动 MCP Hub (在 mcp-hub 目录)
+#
+#   cd mcp-hub && npm install && npm start
+#
+# 步骤 3: 配置你的 Agent 连接 http://localhost:4000
 #
 # =====================================================================
 
 services:
   # ==================== WAF2 - HTTP 层 LLM 动态检测 ====================
-  # 作为 HTTP 代理，用户的 MCP Server 发送 HTTP 请求时应配置走这个代理
   waf2:
     build: ./waf2
     container_name: waf2
@@ -43,30 +42,7 @@ services:
       - LLM_MODEL=${LLM_MODEL:-qwen-turbo}
       - VERIFY_SSL=${VERIFY_SSL:-true}
     extra_hosts:
-      # Linux 需要这个来访问宿主机，Windows/Mac Docker Desktop 已内置
       - "host.docker.internal:host-gateway"
-    networks:
-      - mcp-net
-    restart: unless-stopped
-
-  # ==================== MCP Hub - WAF1 协议层检测 ====================
-  # Agent 连接到这里，MCP Hub 再连接用户在 config/mcp-servers.json 中配置的 MCP Server
-  mcphub:
-    build: ./mcp-hub
-    container_name: mcphub
-    ports:
-      - "${MCP_HUB_PORT:-4000}:4000"
-    environment:
-      - GUARDRAILS_CONFIG=/app/config/guardrails-config.json
-      - MCP_SERVERS_CONFIG=/app/config/mcp-servers.json
-      # WAF2 地址，用于配置同步
-      - WAF2_URL=http://waf2:8081
-      # 以下是传递给 WAF2 的目标应用配置
-      - TARGET_URL=${TARGET_URL:-http://host.docker.internal:3000}
-    extra_hosts:
-      - "host.docker.internal:host-gateway"
-    volumes:
-      - ./config:/app/config
     networks:
       - mcp-net
     restart: unless-stopped

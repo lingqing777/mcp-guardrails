@@ -136,6 +136,9 @@ if (AUTH_ENABLED) {
 }
 
 // 静态文件中间件 (CSS, JS) - 在认证之后
+// 同时挂载到 / 和 /dashboard 以支持相对路径引用
+app.use(express.static(dockerDashboardPath, { fallthrough: true }));
+app.use(express.static(localDashboardPath, { fallthrough: true }));
 app.use('/dashboard', express.static(dockerDashboardPath, { fallthrough: true }));
 app.use('/dashboard', express.static(localDashboardPath));
 
