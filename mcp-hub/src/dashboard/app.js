@@ -34,17 +34,247 @@ let currentMode = 'full';
 // 当前测试工具
 let currentTestTool = null;
 
+// 图表实例
+let trendChart = null;
+let pieChart = null;
+
+// 趋势数据历史 (最近 10 分钟，每 5 秒一个点)
+let trendHistory = [];
+const TREND_MAX_POINTS = 120; // 10分钟 * 60秒 / 5秒 = 120 点
+
 // ==================== 初始化 ====================
 
 document.addEventListener('DOMContentLoaded', () => {
+    initTheme();
     checkAuthStatus();
     initTabs();
     loadConfig();
     initConfigPanel();
+    initCharts();
     refreshData();
     fetchMcpServers();
     startAutoRefresh();
 });
+
+// ==================== 主题切换 ====================
+
+function initTheme() {
+    const savedTheme = localStorage.getItem('theme') || 'dark';
+    document.documentElement.setAttribute('data-theme', savedTheme);
+    updateThemeIcon(savedTheme);
+}
+
+function toggleTheme() {
+    const currentTheme = document.documentElement.getAttribute('data-theme');
+    const newTheme = currentTheme === 'dark' ? 'light' : 'dark';
+    document.documentElement.setAttribute('data-theme', newTheme);
+    localStorage.setItem('theme', newTheme);
+    updateThemeIcon(newTheme);
+
+    // 更新图表颜色
+    if (trendChart || pieChart) {
+        updateChartsTheme(newTheme);
+    }
+}
+
+function updateThemeIcon(theme) {
+    const icon = document.querySelector('.theme-icon');
+    if (icon) {
+        icon.textContent = theme === 'dark' ? '🌙' : '☀️';
+    }
+}
+
+function updateChartsTheme(theme) {
+    const textColor = theme === 'dark' ? '#e4e4e4' : '#1a1a2e';
+    const gridColor = theme === 'dark' ? 'rgba(255,255,255,0.1)' : 'rgba(0,0,0,0.1)';
+
+    if (trendChart) {
+        trendChart.options.scales.x.ticks.color = textColor;
+        trendChart.options.scales.y.ticks.color = textColor;
+        trendChart.options.scales.x.grid.color = gridColor;
+        trendChart.options.scales.y.grid.color = gridColor;
+        trendChart.update('none');
+    }
+
+    if (pieChart) {
+        pieChart.options.plugins.legend.labels.color = textColor;
+        pieChart.update('none');
+    }
+}
+
+// ==================== 图表初始化 ====================
+
+function initCharts() {
+    const theme = document.documentElement.getAttribute('data-theme') || 'dark';
+    const textColor = theme === 'dark' ? '#e4e4e4' : '#1a1a2e';
+    const gridColor = theme === 'dark' ? 'rgba(255,255,255,0.1)' : 'rgba(0,0,0,0.1)';
+
+    // 趋势图
+    const trendCtx = document.getElementById('trend-chart');
+    if (trendCtx && typeof Chart !== 'undefined') {
+        trendChart = new Chart(trendCtx, {
+            type: 'line',
+            data: {
+                labels: [],
+                datasets: [
+                    {
+                        label: '拦截',
+                        data: [],
+                        borderColor: '#ff4757',
+                        backgroundColor: 'rgba(255, 71, 87, 0.1)',
+                        fill: true,
+                        tension: 0.4,
+                        pointRadius: 0,
+                        pointHoverRadius: 4,
+                    },
+                    {
+                        label: '放行',
+                        data: [],
+                        borderColor: '#00ff88',
+                        backgroundColor: 'rgba(0, 255, 136, 0.1)',
+                        fill: true,
+                        tension: 0.4,
+                        pointRadius: 0,
+                        pointHoverRadius: 4,
+                    }
+                ]
+            },
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                interaction: {
+                    intersect: false,
+                    mode: 'index',
+                },
+                plugins: {
+                    legend: {
+                        position: 'top',
+                        labels: { color: textColor, usePointStyle: true, padding: 20 }
+                    },
+                    tooltip: {
+                        backgroundColor: 'rgba(0,0,0,0.8)',
+                        padding: 12,
+                        cornerRadius: 8,
+                    }
+                },
+                scales: {
+                    x: {
+                        ticks: { color: textColor, maxTicksLimit: 10 },
+                        grid: { color: gridColor }
+                    },
+                    y: {
+                        beginAtZero: true,
+                        ticks: { color: textColor, stepSize: 1 },
+                        grid: { color: gridColor }
+                    }
+                }
+            }
+        });
+    }
+
+    // 饼图
+    const pieCtx = document.getElementById('pie-chart');
+    if (pieCtx && typeof Chart !== 'undefined') {
+        pieChart = new Chart(pieCtx, {
+            type: 'doughnut',
+            data: {
+                labels: ['SQL 注入', '命令注入', 'XSS', '路径遍历', '其他'],
+                datasets: [{
+                    data: [0, 0, 0, 0, 0],
+                    backgroundColor: [
+                        '#ff4757',
+                        '#ffa502',
+                        '#2ed573',
+                        '#1e90ff',
+                        '#a55eea'
+                    ],
+                    borderWidth: 0,
+                    hoverOffset: 10
+                }]
+            },
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                cutout: '60%',
+                plugins: {
+                    legend: {
+                        position: 'right',
+                        labels: {
+                            color: textColor,
+                            usePointStyle: true,
+                            padding: 15,
+                            font: { size: 12 }
+                        }
+                    },
+                    tooltip: {
+                        backgroundColor: 'rgba(0,0,0,0.8)',
+                        padding: 12,
+                        cornerRadius: 8,
+                    }
+                }
+            }
+        });
+    }
+}
+
+function updateTrendChart(blocked, passed) {
+    if (!trendChart) return;
+
+    const now = new Date();
+    const timeLabel = now.toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+
+    // 计算增量
+    const lastBlocked = trendHistory.length > 0 ? trendHistory[trendHistory.length - 1].blocked : 0;
+    const lastPassed = trendHistory.length > 0 ? trendHistory[trendHistory.length - 1].passed : 0;
+
+    const blockedDelta = Math.max(0, blocked - lastBlocked);
+    const passedDelta = Math.max(0, passed - lastPassed);
+
+    trendHistory.push({ time: timeLabel, blocked, passed, blockedDelta, passedDelta });
+
+    if (trendHistory.length > TREND_MAX_POINTS) {
+        trendHistory.shift();
+    }
+
+    trendChart.data.labels = trendHistory.map(h => h.time);
+    trendChart.data.datasets[0].data = trendHistory.map(h => h.blockedDelta);
+    trendChart.data.datasets[1].data = trendHistory.map(h => h.passedDelta);
+    trendChart.update('none');
+}
+
+function updatePieChart(categoryData) {
+    if (!pieChart || !categoryData) return;
+
+    const categories = {
+        'SQL 注入': 0,
+        '命令注入': 0,
+        'XSS': 0,
+        '路径遍历': 0,
+        '其他': 0
+    };
+
+    // 映射数据
+    for (const [key, value] of Object.entries(categoryData)) {
+        const lowerKey = key.toLowerCase();
+        if (lowerKey.includes('sql')) {
+            categories['SQL 注入'] += value;
+        } else if (lowerKey.includes('shell') || lowerKey.includes('command') || lowerKey.includes('cmd')) {
+            categories['命令注入'] += value;
+        } else if (lowerKey.includes('xss') || lowerKey.includes('script')) {
+            categories['XSS'] += value;
+        } else if (lowerKey.includes('path') || lowerKey.includes('traversal') || lowerKey.includes('lfi')) {
+            categories['路径遍历'] += value;
+        } else {
+            categories['其他'] += value;
+        }
+    }
+
+    pieChart.data.datasets[0].data = Object.values(categories);
+    pieChart.update('none');
+}
+
+// 导出主题切换函数
+window.toggleTheme = toggleTheme;
 
 // ==================== 认证相关 ====================
 
@@ -192,7 +422,16 @@ function updateOverview() {
     document.getElementById('cache-detail').textContent = `${waf2Data?.cache?.hits || 0} 命中 / ${waf2Data?.cache?.llm_calls || 0} LLM调用`;
     document.getElementById('avg-latency').textContent = (waf2Data?.summary?.avg_latency_ms || '-') + 'ms';
 
-    // 使用组件渲染图表
+    // 更新 Chart.js 图表
+    updateTrendChart(totalBlocked, totalPassed);
+
+    const mergedCategories = mergeChartData(
+        waf1Data?.last24h?.byCategory || waf1Data?.rules || waf1Data?.by_category || {},
+        waf2Data?.by_category || {}
+    );
+    updatePieChart(mergedCategories);
+
+    // 使用组件渲染条形图
     const waf1Categories = waf1Data?.last24h?.byCategory || waf1Data?.rules || waf1Data?.by_category || {};
     const waf2Categories = waf2Data?.by_category || {};
     renderBarChart('category-chart', mergeChartData(waf1Categories, waf2Categories), 'default');

@@ -1,15 +1,20 @@
 <!DOCTYPE html>
-<html lang="zh-CN">
+<html lang="zh-CN" data-theme="dark">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>MCP Guardrails - 统一安全仪表盘</title>
     <link rel="stylesheet" href="styles.css">
+    <!-- Chart.js CDN -->
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
 </head>
 <body>
     <div class="header">
         <h1>MCP Guardrails Security Dashboard</h1>
         <div class="status">
+            <button class="theme-toggle" onclick="toggleTheme()" title="切换主题">
+                <span class="theme-icon">🌙</span>
+            </button>
             <div class="status-item" id="user-display">
                 <!-- 用户信息由 JS 填充 -->
             </div>
@@ -90,7 +95,22 @@
 
             <div class="two-cols">
                 <div class="panel">
-                    <div class="panel-title">按攻击类型分布</div>
+                    <div class="panel-title">拦截趋势 (最近 10 分钟)</div>
+                    <div class="chart-container">
+                        <canvas id="trend-chart"></canvas>
+                    </div>
+                </div>
+                <div class="panel">
+                    <div class="panel-title">攻击类型分布</div>
+                    <div class="chart-container">
+                        <canvas id="pie-chart"></canvas>
+                    </div>
+                </div>
+            </div>
+
+            <div class="two-cols">
+                <div class="panel">
+                    <div class="panel-title">按攻击类型分布 (详细)</div>
                     <div class="bar-chart" id="category-chart">
                         <div class="empty-state">暂无数据</div>
                     </div>
