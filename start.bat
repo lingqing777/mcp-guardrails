@@ -1,67 +1,83 @@
 @echo off
 chcp 65001 >nul 2>&1
-REM MCP Guardrails 一键启动脚本 (Windows)
 
 echo ==========================================
-echo   MCP Guardrails - 安全网关启动脚本
+echo   MCP Guardrails - Security Gateway
 echo ==========================================
 
-REM 检查 Docker
+REM Check Docker
 docker --version >nul 2>&1
 if errorlevel 1 (
-    echo 错误: 请先安装 Docker Desktop
-    pause
-    exit /b 1
+    echo.
+    echo [ERROR] Docker Desktop is not installed or not running.
+    goto :fail
 )
 
-REM 检查 Node.js
+REM Check Node.js
 node --version >nul 2>&1
 if errorlevel 1 (
-    echo 错误: 请先安装 Node.js ^(^>=18^)
-    pause
-    exit /b 1
+    echo.
+    echo [ERROR] Node.js is not installed. Please install Node.js ^(^>=18^).
+    goto :fail
 )
 
-REM 获取脚本所在目录
+REM Switch to script directory
 cd /d "%~dp0"
 
-REM 创建 .env 文件 (可选，Dashboard 中也可配置)
+REM Create .env if not exists
 if not exist .env (
     copy .env.example .env >nul 2>&1
 )
 
-REM 步骤 1: 启动 Docker 服务 (WAF2)
+REM Step 1: Start WAF2 Docker service
 echo.
-echo [1/3] 启动 WAF2 服务...
+echo [1/3] Starting WAF2 service (Docker)...
 docker-compose up -d --build
+if errorlevel 1 (
+    echo.
+    echo [WARN] WAF2 Docker service failed to start. Is Docker Desktop running?
+    echo        Skipping WAF2, continuing with MCP Hub...
+    echo.
+)
 
-REM 步骤 2: 安装 MCP Hub 依赖
+REM Step 2: Install MCP Hub dependencies
 echo.
-echo [2/3] 安装 MCP Hub 依赖...
+echo [2/3] Installing MCP Hub dependencies...
 cd mcp-hub
 if not exist node_modules (
     call npm install
+    if errorlevel 1 (
+        echo.
+        echo [ERROR] npm install failed.
+        cd /d "%~dp0"
+        goto :fail
+    )
 )
 
-REM 步骤 3: 启动 MCP Hub
+REM Step 3: Start MCP Hub
 echo.
-echo [3/3] 启动 MCP Hub...
+echo [3/3] Starting MCP Hub...
 echo.
 echo ==========================================
-echo   启动完成！
+echo   Ready!
 echo ==========================================
 echo.
-echo   Dashboard:    http://localhost:4000
-echo   登录账号:     admin / guardrails
-echo.
-echo   在 Dashboard 中完成所有配置:
-echo   - 配置页面: 设置目标URL和API Key
-echo   - MCP Servers页面: 添加你的MCP Server
-echo.
-echo   Agent 连接地址: http://localhost:4000/mcp
+echo   Dashboard:  http://localhost:4000
+echo   Login:      admin / guardrails
+echo   MCP:        http://localhost:4000/mcp
 echo.
 echo ==========================================
 echo.
 
-REM 启动 MCP Hub (前台运行)
+REM Run MCP Hub (foreground)
 node ./src/utils/cli.js --port 4000 --config ../config/mcp-servers.json
+
+echo.
+echo [!] MCP Hub has stopped.
+echo.
+
+:fail
+echo.
+echo Press any key to close...
+pause >nul
+exit /b 1
