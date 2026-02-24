@@ -13,6 +13,28 @@ import { setToggleStates } from './components/Toggle.js';
 
 // ==================== 全局状态 ====================
 
+// LLM Provider 预设映射表
+const LLM_PROVIDERS = {
+    dashscope:   { label: '通义千问',         format: 'openai',    baseUrl: 'https://dashscope.aliyuncs.com/compatible-mode/v1', model: 'qwen-turbo',                 keyUrl: 'https://bailian.console.aliyun.com/#/api-key' },
+    openai:      { label: 'OpenAI',           format: 'openai',    baseUrl: 'https://api.openai.com/v1',                        model: 'gpt-4o-mini',                keyUrl: 'https://platform.openai.com/api-keys' },
+    deepseek:    { label: 'DeepSeek',         format: 'openai',    baseUrl: 'https://api.deepseek.com/v1',                      model: 'deepseek-chat',              keyUrl: 'https://platform.deepseek.com/api_keys' },
+    grok:        { label: 'Grok',             format: 'openai',    baseUrl: 'https://api.x.ai/v1',                              model: 'grok-2',                     keyUrl: 'https://console.x.ai/' },
+    anthropic:   { label: 'Claude',           format: 'anthropic', baseUrl: 'https://api.anthropic.com',                        model: 'claude-sonnet-4-5-20250929', keyUrl: 'https://console.anthropic.com/settings/keys' },
+    gemini:      { label: 'Gemini',           format: 'gemini',    baseUrl: 'https://generativelanguage.googleapis.com',        model: 'gemini-2.5-flash',           keyUrl: 'https://aistudio.google.com/apikey' },
+    groq:        { label: 'Groq',             format: 'openai',    baseUrl: 'https://api.groq.com/openai/v1',                   model: 'llama-3.3-70b-versatile',    keyUrl: 'https://console.groq.com/keys' },
+    mistral:     { label: 'Mistral',          format: 'openai',    baseUrl: 'https://api.mistral.ai/v1',                        model: 'mistral-large-latest',       keyUrl: 'https://console.mistral.ai/api-keys' },
+    moonshot:    { label: 'Moonshot',         format: 'openai',    baseUrl: 'https://api.moonshot.cn/v1',                       model: 'moonshot-v1-8k',             keyUrl: 'https://platform.moonshot.cn/console/api-keys' },
+    zhipu:       { label: '智谱 AI',          format: 'openai',    baseUrl: 'https://open.bigmodel.cn/api/paas/v4',             model: 'glm-4-flash',                keyUrl: 'https://open.bigmodel.cn/usercenter/apikeys' },
+    siliconflow: { label: 'SiliconFlow',      format: 'openai',    baseUrl: 'https://api.siliconflow.cn/v1',                    model: 'deepseek-ai/DeepSeek-V3',    keyUrl: 'https://cloud.siliconflow.cn/account/ak' },
+    perplexity:  { label: 'Perplexity',       format: 'openai',    baseUrl: 'https://api.perplexity.ai',                        model: 'sonar',                      keyUrl: 'https://www.perplexity.ai/settings/api' },
+    baidu:       { label: '百度文心',         format: 'openai',    baseUrl: 'https://qianfan.baidubce.com/v2',                  model: 'ernie-4.0-8k',               keyUrl: 'https://console.bce.baidu.com/iam/#/iam/apikey' },
+    doubao:      { label: '豆包',             format: 'openai',    baseUrl: 'https://ark.cn-beijing.volces.com/api/v3',         model: 'doubao-1.5-pro-32k',         keyUrl: 'https://console.volcengine.com/ark/region:ark+cn-beijing/apiKey' },
+    xfyun:       { label: '讯飞星火',         format: 'openai',    baseUrl: 'https://spark-api-open.xf-yun.com/v1',             model: 'generalv3.5',                keyUrl: 'https://console.xfyun.cn/services/bm35' },
+    hunyuan:     { label: '腾讯混元',         format: 'openai',    baseUrl: 'https://api.hunyuan.cloud.tencent.com/v1',         model: 'hunyuan-lite',               keyUrl: 'https://console.cloud.tencent.com/cam/capi' },
+    ollama:      { label: 'Ollama',           format: 'openai',    baseUrl: 'http://localhost:11434/v1',                        model: 'llama3',                     keyUrl: '' },
+    custom:      { label: '自定义',           format: 'openai',    baseUrl: '',                                                 model: '',                           keyUrl: '' }
+};
+
 let WAF1_URL = 'http://localhost:4000';
 let WAF2_URL = 'http://localhost:8081';
 let REFRESH_INTERVAL = 5000;
@@ -64,24 +86,47 @@ function initTheme() {
     updateThemeIcon(savedTheme);
 }
 
-function toggleTheme() {
+async function toggleTheme(event) {
     const currentTheme = document.documentElement.getAttribute('data-theme');
     const newTheme = currentTheme === 'dark' ? 'light' : 'dark';
-    document.documentElement.setAttribute('data-theme', newTheme);
-    localStorage.setItem('theme', newTheme);
-    updateThemeIcon(newTheme);
 
-    // 更新图表颜色
-    if (trendChart || pieChart) {
-        updateChartsTheme(newTheme);
+    // 获取点击位置（圆形展开的圆心）
+    const btn = document.querySelector('.theme-toggle');
+    const rect = btn.getBoundingClientRect();
+    const x = rect.left + rect.width / 2;
+    const y = rect.top + rect.height / 2;
+
+    // 如果浏览器支持 View Transitions API 且用户没有 prefers-reduced-motion
+    if (document.startViewTransition && !window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
+        const transition = document.startViewTransition(() => {
+            document.documentElement.setAttribute('data-theme', newTheme);
+            localStorage.setItem('theme', newTheme);
+            updateThemeIcon(newTheme);
+            if (trendChart || pieChart) updateChartsTheme(newTheme);
+        });
+
+        await transition.ready;
+
+        // 计算覆盖整个视口所需的最大半径
+        const right = window.innerWidth - x;
+        const bottom = window.innerHeight - y;
+        const maxRadius = Math.hypot(Math.max(x, right), Math.max(y, bottom));
+
+        document.documentElement.animate(
+            { clipPath: [`circle(0px at ${x}px ${y}px)`, `circle(${maxRadius}px at ${x}px ${y}px)`] },
+            { duration: 500, easing: 'ease-in-out', pseudoElement: '::view-transition-new(root)' }
+        );
+    } else {
+        // 降级：无动画直接切换
+        document.documentElement.setAttribute('data-theme', newTheme);
+        localStorage.setItem('theme', newTheme);
+        updateThemeIcon(newTheme);
+        if (trendChart || pieChart) updateChartsTheme(newTheme);
     }
 }
 
 function updateThemeIcon(theme) {
-    const icon = document.querySelector('.theme-icon');
-    if (icon) {
-        icon.textContent = theme === 'dark' ? '🌙' : '☀️';
-    }
+    // SVG 图标的显隐通过 CSS [data-theme] 选择器自动控制，无需 JS 操作
 }
 
 function updateChartsTheme(theme) {
@@ -344,6 +389,92 @@ function initTabs() {
 }
 
 // ==================== 配置管理 ====================
+
+// Format 标签文字映射
+const FORMAT_LABELS = {
+    openai: 'OpenAI 兼容',
+    anthropic: 'Anthropic',
+    gemini: 'Gemini 原生'
+};
+
+// Provider 卡片点击处理
+function onProviderCardClick(card, section) {
+    const suffix = section === 'full' ? '' : '-lite';
+    const gridEl = document.getElementById(`provider-grid${suffix}`);
+    const moreEl = document.getElementById(`provider-more${suffix}`);
+    const panelEl = document.getElementById(`provider-config-panel${suffix}`);
+    const baseUrlEl = document.getElementById(`cfg-baseurl${suffix}`);
+    const modelEl = document.getElementById(`cfg-model${suffix}`);
+    const badgeEl = document.getElementById(`cfg-format-badge${suffix}`);
+    const keyLinkEl = document.getElementById(`cfg-key-link${suffix}`);
+    const apiKeyRowEl = document.getElementById(`cfg-apikey-row${suffix}`);
+    const apiKeyHintEl = document.getElementById(`cfg-apikey-hint${suffix}`);
+    const formatSelectorEl = document.getElementById(`cfg-format-selector${suffix}`);
+
+    // 切换选中态 — 两个容器都要清除
+    if (gridEl) gridEl.querySelectorAll('.provider-card').forEach(c => c.classList.remove('selected'));
+    if (moreEl) moreEl.querySelectorAll('.provider-card').forEach(c => c.classList.remove('selected'));
+    card.classList.add('selected');
+
+    const providerKey = card.dataset.provider;
+    const provider = LLM_PROVIDERS[providerKey];
+    if (!provider) return;
+
+    // 填充配置字段
+    if (baseUrlEl) baseUrlEl.value = provider.baseUrl;
+    if (modelEl) modelEl.value = provider.model;
+
+    // 更新格式标签
+    if (badgeEl) {
+        badgeEl.textContent = FORMAT_LABELS[provider.format] || provider.format;
+        badgeEl.className = `provider-config-format-badge ${provider.format}`;
+    }
+
+    // 更新获取 Key 链接
+    if (keyLinkEl) {
+        if (provider.keyUrl) {
+            keyLinkEl.href = provider.keyUrl;
+            keyLinkEl.style.display = '';
+        } else {
+            keyLinkEl.style.display = 'none';
+        }
+    }
+
+    // Ollama: 隐藏 API Key 行，显示占位提示
+    if (providerKey === 'ollama') {
+        if (apiKeyRowEl) apiKeyRowEl.classList.add('hidden');
+        if (apiKeyHintEl) apiKeyHintEl.style.display = '';
+    } else {
+        if (apiKeyRowEl) apiKeyRowEl.classList.remove('hidden');
+        if (apiKeyHintEl) apiKeyHintEl.style.display = 'none';
+    }
+
+    // 自定义: 显示格式选择器，清空字段
+    if (formatSelectorEl) {
+        formatSelectorEl.style.display = providerKey === 'custom' ? 'flex' : 'none';
+    }
+    if (providerKey === 'custom') {
+        if (baseUrlEl) baseUrlEl.value = '';
+        if (modelEl) modelEl.value = '';
+    }
+
+    // 展开配置面板
+    if (panelEl) panelEl.classList.add('open');
+}
+window.onProviderCardClick = onProviderCardClick;
+
+// 初始化卡片点击事件绑定
+function initProviderCardEvents(section) {
+    const suffix = section === 'full' ? '' : '-lite';
+    // 绑定主网格和更多区域的所有卡片
+    [`provider-grid${suffix}`, `provider-more${suffix}`].forEach(id => {
+        const el = document.getElementById(id);
+        if (!el) return;
+        el.querySelectorAll('.provider-card').forEach(card => {
+            card.addEventListener('click', () => onProviderCardClick(card, section));
+        });
+    });
+}
 
 function loadConfig() {
     const config = getConfig();
@@ -616,14 +747,26 @@ async function toggleRuleSm(el) {
 }
 
 async function applyConfig() {
-    let targetUrl, apiKey;
+    let targetUrl, apiKey, provider, baseUrl, model;
+    const suffix = currentMode === 'full' ? '' : '-lite';
 
-    if (currentMode === 'full') {
-        targetUrl = document.getElementById('cfg-target-url').value;
-        apiKey = document.getElementById('cfg-apikey').value;
+    targetUrl = document.getElementById(`cfg-target-url${suffix}`).value;
+    apiKey = document.getElementById(`cfg-apikey${suffix}`).value;
+    // 从选中的卡片读取 provider
+    const selectedCard = document.querySelector(`#provider-grid${suffix} .provider-card.selected`) ||
+                         document.querySelector(`#provider-more${suffix} .provider-card.selected`);
+    provider = selectedCard ? selectedCard.dataset.provider : 'dashscope';
+    baseUrl = document.getElementById(`cfg-baseurl${suffix}`).value;
+    model = document.getElementById(`cfg-model${suffix}`).value;
+
+    // 确定 format：预设 Provider 从映射表取，自定义从 radio 取
+    let format;
+    if (provider === 'custom') {
+        const checked = document.querySelector(`input[name="cfg-format${suffix}"]:checked`);
+        format = checked ? checked.value : 'openai';
     } else {
-        targetUrl = document.getElementById('cfg-target-url-lite').value;
-        apiKey = document.getElementById('cfg-apikey-lite').value;
+        const p = LLM_PROVIDERS[provider];
+        format = p ? p.format : 'openai';
     }
 
     if (targetUrl && !targetUrl.match(/^https?:\/\/.+/)) {
@@ -633,10 +776,17 @@ async function applyConfig() {
 
     showConfigStatus('config-status', 'info', '正在保存配置...');
 
+    const llmConfig = {};
+    if (provider) llmConfig.provider = provider;
+    if (baseUrl) llmConfig.baseUrl = baseUrl;
+    if (model) llmConfig.model = model;
+    if (apiKey) llmConfig.apiKey = apiKey;
+    if (format) llmConfig.format = format;
+
     try {
         const data = await api.waf2.updateConfig({
             upstream: targetUrl || undefined,
-            llm: apiKey ? { apiKey } : undefined
+            llm: Object.keys(llmConfig).length > 0 ? llmConfig : undefined
         });
         if (data.success) {
             if (data.synced) {
@@ -691,6 +841,42 @@ async function initConfigPanel() {
             const targetLite = document.getElementById('cfg-target-url-lite');
             if (targetFull) targetFull.value = config.waf2.upstream;
             if (targetLite) targetLite.value = config.waf2.upstream;
+        }
+
+        // 回填 LLM Provider 配置
+        if (config.waf2?.llm) {
+            const llm = config.waf2.llm;
+            ['', '-lite'].forEach(suffix => {
+                const section = suffix === '' ? 'full' : 'lite';
+                const gridEl = document.getElementById(`provider-grid${suffix}`);
+                const moreEl = document.getElementById(`provider-more${suffix}`);
+                const baseUrlEl = document.getElementById(`cfg-baseurl${suffix}`);
+                const modelEl = document.getElementById(`cfg-model${suffix}`);
+
+                // 绑定卡片点击事件
+                initProviderCardEvents(section);
+
+                // 选中已保存的 provider 卡片（搜索主网格和更多区域）
+                if (llm.provider) {
+                    const card = (gridEl && gridEl.querySelector(`.provider-card[data-provider="${llm.provider}"]`)) ||
+                                 (moreEl && moreEl.querySelector(`.provider-card[data-provider="${llm.provider}"]`));
+                    if (card) {
+                        onProviderCardClick(card, section);
+                    }
+                }
+                // 用服务器保存的值覆盖预设值
+                if (baseUrlEl && llm.baseUrl) baseUrlEl.value = llm.baseUrl;
+                if (modelEl && llm.model) modelEl.value = llm.model;
+                // 自定义 Provider 时恢复 format radio 状态
+                if (llm.provider === 'custom' && llm.format) {
+                    const radio = document.querySelector(`input[name="cfg-format${suffix}"][value="${llm.format}"]`);
+                    if (radio) radio.checked = true;
+                }
+            });
+        } else {
+            // 无配置时也要绑定事件
+            initProviderCardEvents('full');
+            initProviderCardEvents('lite');
         }
 
         // 使用组件设置开关状态
@@ -750,17 +936,34 @@ async function initConfigPanel() {
         if (targetFull) targetFull.value = savedTarget;
         if (targetLite) targetLite.value = savedTarget;
     }
+
+    // 后备路径也要绑定卡片事件
+    initProviderCardEvents('full');
+    initProviderCardEvents('lite');
+}
+
+function toggleConfigSection(sectionId) {
+    const section = document.querySelector(`.config-section[data-section-id="${sectionId}"]`);
+    if (section) section.classList.toggle('collapsed');
+}
+
+function toggleProviderMore(section) {
+    const suffix = section === 'full' ? '' : '-lite';
+    const moreEl = document.getElementById(`provider-more${suffix}`);
+    const toggleBtn = moreEl ? moreEl.nextElementSibling : null;
+    if (!moreEl) return;
+    const isCollapsed = moreEl.classList.toggle('collapsed');
+    if (toggleBtn) {
+        toggleBtn.classList.toggle('expanded', !isCollapsed);
+        const label = toggleBtn.querySelector('.provider-more-label');
+        if (label) label.textContent = isCollapsed ? '更多 Provider' : '收起';
+    }
 }
 
 function toggleAccordion(id) {
+    // Legacy compat — route config-guide to unified mechanism
     if (id === 'config-guide') {
-        const content = document.getElementById('config-guide-content');
-        const chevron = document.getElementById('config-guide-chevron');
-        if (content && chevron) {
-            const isExpanded = content.style.maxHeight && content.style.maxHeight !== '0px';
-            content.style.maxHeight = isExpanded ? '0px' : '500px';
-            chevron.style.transform = isExpanded ? 'rotate(0deg)' : 'rotate(180deg)';
-        }
+        toggleConfigSection('guide');
         return;
     }
 
@@ -1215,6 +1418,8 @@ window.togglePasswordVisibility = togglePasswordVisibility;
 window.toggleRuleSm = toggleRuleSm;
 window.applyConfig = applyConfig;
 window.toggleAccordion = toggleAccordion;
+window.toggleConfigSection = toggleConfigSection;
+window.toggleProviderMore = toggleProviderMore;
 window.toggleRule = toggleRule;
 window.selectModel = selectModel;
 window.toggleAutoRefresh = toggleAutoRefresh;
