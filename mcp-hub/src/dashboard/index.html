@@ -33,7 +33,8 @@
 
     <div class="container">
         <div class="tabs">
-            <div class="tab active" data-tab="overview">总览</div>
+            <div class="tab active" data-tab="monitor">态势感知</div>
+            <div class="tab" data-tab="overview">总览</div>
             <div class="tab" data-tab="servers">MCP Servers</div>
             <div class="tab" data-tab="waf1">WAF1 详情</div>
             <div class="tab" data-tab="waf2">WAF2 详情</div>
@@ -41,8 +42,170 @@
             <div class="tab" data-tab="config">配置</div>
         </div>
 
+        <!-- 态势感知面板 -->
+        <div id="monitor-panel" class="tab-content">
+            <div class="monitor-grid">
+                <!-- Panel 1: Attack Log Stream (spans 2 rows) -->
+                <section class="monitor-card panel-log">
+                    <div class="monitor-card-header">
+                        <h2 class="monitor-card-title">
+                            <span class="monitor-icon monitor-icon-red"></span>
+                            实时攻击日志
+                        </h2>
+                        <div class="monitor-card-actions">
+                            <span class="monitor-badge" id="monitor-log-count">0</span>
+                            <button class="monitor-fullscreen-btn" onclick="enterMonitorFullscreen()" title="全屏">
+                                <svg width="14" height="14" viewBox="0 0 16 16" fill="none"><path d="M2 6V3a1 1 0 011-1h3M10 2h3a1 1 0 011 1v3M14 10v3a1 1 0 01-1 1h-3M6 14H3a1 1 0 01-1-1v-3" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"/></svg>
+                            </button>
+                        </div>
+                    </div>
+                    <div class="monitor-log-stream" id="monitor-log-stream">
+                        <div class="monitor-empty" id="monitor-log-empty">暂无攻击记录</div>
+                    </div>
+                </section>
+
+                <!-- Panel 2: Topology -->
+                <section class="monitor-card panel-topology">
+                    <div class="monitor-card-header">
+                        <h2 class="monitor-card-title">
+                            <span class="monitor-icon monitor-icon-blue"></span>
+                            双层防护拓扑
+                        </h2>
+                    </div>
+                    <div class="monitor-topology-container">
+                        <svg id="monitor-topology-svg" viewBox="0 0 520 320" preserveAspectRatio="xMidYMid meet">
+                            <g class="topo-lines">
+                                <path id="m-line-agent-waf1" class="m-topo-line" d="M100,80 L260,80"/>
+                                <path id="m-line-waf1-mcp" class="m-topo-line" d="M260,80 L260,160"/>
+                                <path id="m-line-mcp-waf2" class="m-topo-line" d="M260,160 L260,240"/>
+                                <path id="m-line-waf2-target" class="m-topo-line" d="M260,240 L420,240"/>
+                            </g>
+                            <g class="topo-particles">
+                                <circle class="m-particle" r="2.5">
+                                    <animateMotion dur="2s" repeatCount="indefinite" path="M100,80 L260,80 L260,160 L260,240 L420,240"/>
+                                </circle>
+                                <circle class="m-particle" r="2.5">
+                                    <animateMotion dur="2s" repeatCount="indefinite" path="M100,80 L260,80 L260,160 L260,240 L420,240" begin="0.7s"/>
+                                </circle>
+                                <circle class="m-particle" r="2.5">
+                                    <animateMotion dur="2s" repeatCount="indefinite" path="M100,80 L260,80 L260,160 L260,240 L420,240" begin="1.4s"/>
+                                </circle>
+                            </g>
+                            <g class="m-topo-node" id="m-node-agent">
+                                <rect x="40" y="55" width="120" height="50" rx="8"/>
+                                <text x="100" y="76" class="m-node-label">AI Agent</text>
+                                <circle cx="56" cy="92" r="4" class="m-node-status m-status-online"/>
+                                <text x="66" y="96" class="m-node-status-text">连接中</text>
+                            </g>
+                            <g class="m-topo-node" id="m-node-waf1">
+                                <rect x="200" y="55" width="120" height="50" rx="8"/>
+                                <text x="260" y="76" class="m-node-label">WAF1</text>
+                                <circle cx="216" cy="92" r="4" class="m-node-status m-status-online"/>
+                                <text x="226" y="96" class="m-node-status-text">静态规则</text>
+                            </g>
+                            <g class="m-topo-node" id="m-node-mcp">
+                                <rect x="200" y="135" width="120" height="50" rx="8"/>
+                                <text x="260" y="156" class="m-node-label">MCP Servers</text>
+                                <circle cx="216" cy="172" r="4" class="m-node-status m-status-online"/>
+                                <text x="226" y="176" class="m-node-status-text" id="m-mcp-count">0 个</text>
+                            </g>
+                            <g class="m-topo-node" id="m-node-waf2">
+                                <rect x="200" y="215" width="120" height="50" rx="8"/>
+                                <text x="260" y="236" class="m-node-label">WAF2</text>
+                                <circle cx="216" cy="252" r="4" class="m-node-status m-status-online"/>
+                                <text x="226" y="256" class="m-node-status-text">LLM 语义</text>
+                            </g>
+                            <g class="m-topo-node" id="m-node-target">
+                                <rect x="360" y="215" width="120" height="50" rx="8"/>
+                                <text x="420" y="236" class="m-node-label">目标应用</text>
+                                <circle cx="376" cy="252" r="4" class="m-node-status m-status-online"/>
+                                <text x="386" y="256" class="m-node-status-text">运行中</text>
+                            </g>
+                        </svg>
+                    </div>
+                </section>
+
+                <!-- Panel 3: Threat Level -->
+                <section class="monitor-card panel-threat">
+                    <div class="monitor-card-header">
+                        <h2 class="monitor-card-title">
+                            <span class="monitor-icon monitor-icon-orange"></span>
+                            威胁等级
+                        </h2>
+                    </div>
+                    <div class="monitor-threat-content">
+                        <div class="monitor-block-rate">
+                            <div class="monitor-ring-value" id="monitor-block-rate">0<span class="monitor-ring-unit">%</span></div>
+                            <div class="monitor-ring-label">拦截率</div>
+                        </div>
+                        <div class="monitor-severity-bars">
+                            <div class="monitor-severity-row">
+                                <span class="monitor-sev-label monitor-sev-critical">CRITICAL</span>
+                                <div class="monitor-sev-track"><div class="monitor-sev-fill critical" id="monitor-bar-critical" style="width:0%"></div></div>
+                                <span class="monitor-sev-count" id="monitor-count-critical">0</span>
+                            </div>
+                            <div class="monitor-severity-row">
+                                <span class="monitor-sev-label monitor-sev-high">HIGH</span>
+                                <div class="monitor-sev-track"><div class="monitor-sev-fill high" id="monitor-bar-high" style="width:0%"></div></div>
+                                <span class="monitor-sev-count" id="monitor-count-high">0</span>
+                            </div>
+                            <div class="monitor-severity-row">
+                                <span class="monitor-sev-label monitor-sev-medium">MEDIUM</span>
+                                <div class="monitor-sev-track"><div class="monitor-sev-fill medium" id="monitor-bar-medium" style="width:0%"></div></div>
+                                <span class="monitor-sev-count" id="monitor-count-medium">0</span>
+                            </div>
+                            <div class="monitor-severity-row">
+                                <span class="monitor-sev-label monitor-sev-low">LOW</span>
+                                <div class="monitor-sev-track"><div class="monitor-sev-fill low" id="monitor-bar-low" style="width:0%"></div></div>
+                                <span class="monitor-sev-count" id="monitor-count-low">0</span>
+                            </div>
+                        </div>
+                    </div>
+                </section>
+
+                <!-- Panel 4: OWASP Chart -->
+                <section class="monitor-card panel-owasp">
+                    <div class="monitor-card-header">
+                        <h2 class="monitor-card-title">
+                            <span class="monitor-icon monitor-icon-purple"></span>
+                            OWASP 攻击分类
+                        </h2>
+                    </div>
+                    <div class="monitor-chart-wrap">
+                        <canvas id="monitor-owasp-chart"></canvas>
+                    </div>
+                </section>
+
+                <!-- Panel 5: WAF1 vs WAF2 Compare -->
+                <section class="monitor-card panel-compare">
+                    <div class="monitor-card-header">
+                        <h2 class="monitor-card-title">
+                            <span class="monitor-icon monitor-icon-green"></span>
+                            WAF1 vs WAF2 拦截对比
+                        </h2>
+                    </div>
+                    <div class="monitor-compare-content">
+                        <div class="monitor-compare-summary">
+                            <div class="monitor-compare-layer">
+                                <div class="monitor-compare-label">WAF1 静态规则</div>
+                                <div class="monitor-compare-value" id="monitor-compare-waf1">0</div>
+                            </div>
+                            <div class="monitor-compare-vs">VS</div>
+                            <div class="monitor-compare-layer">
+                                <div class="monitor-compare-label">WAF2 LLM 语义</div>
+                                <div class="monitor-compare-value" id="monitor-compare-waf2">0</div>
+                            </div>
+                        </div>
+                        <div class="monitor-chart-wrap">
+                            <canvas id="monitor-compare-chart"></canvas>
+                        </div>
+                    </div>
+                </section>
+            </div>
+        </div>
+
         <!-- 总览面板 -->
-        <div id="overview-panel" class="tab-content">
+        <div id="overview-panel" class="tab-content" style="display: none;">
             <div class="section">
                 <div class="section-title">实时统计</div>
                 <div class="grid">
@@ -646,6 +809,12 @@ REST_BASE_URL=<span class="string">http://localhost:8081</span></code>
 
         </div>
     </div>
+
+    <!-- 浮动退出全屏按钮 -->
+    <button class="monitor-exit-fullscreen" id="monitor-exit-fullscreen" onclick="exitMonitorFullscreen()" style="display: none;">
+        <svg width="14" height="14" viewBox="0 0 16 16" fill="none"><path d="M5 2v3H2M11 2v3h3M2 11h3v3M14 11h-3v3" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"/></svg>
+        退出全屏
+    </button>
 
     <script type="module" src="app.js"></script>
 </body>

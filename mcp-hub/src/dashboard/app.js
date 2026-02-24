@@ -326,8 +326,21 @@ function initTabs() {
             } else {
                 console.error('找不到面板:', panelId);
             }
+
+            // 态势感知 Tab 刷新控制
+            if (tab.dataset.tab === 'monitor') {
+                startMonitorRefresh();
+            } else {
+                stopMonitorRefresh();
+            }
         });
     });
+
+    // 默认态势感知 Tab 激活时启动刷新
+    const activeTab = document.querySelector('.tabs > .tab.active');
+    if (activeTab && activeTab.dataset.tab === 'monitor') {
+        startMonitorRefresh();
+    }
 }
 
 // ==================== 配置管理 ====================
@@ -1405,3 +1418,437 @@ function renderServerDetailWithConfig() {
 
 // 替换原函数
 window.renderServerDetail = renderServerDetailWithConfig;
+
+// ==================== 态势感知模块 ====================
+
+// --- State ---
+let monitorTimer = null;
+let monitorPrevLogIds = new Set();
+let monitorPrevWaf1Blocked = 0;
+let monitorPrevWaf2Blocked = 0;
+let monitorOwaspChart = null;
+let monitorCompareChart = null;
+
+// --- Fullscreen (Group 3) ---
+
+function enterMonitorFullscreen() {
+    document.body.classList.add('monitor-fullscreen');
+    const exitBtn = document.getElementById('monitor-exit-fullscreen');
+    if (exitBtn) exitBtn.style.display = 'flex';
+    try {
+        document.documentElement.requestFullscreen();
+    } catch (e) {
+        // Safari fallback
+        try { document.documentElement.webkitRequestFullscreen(); } catch (_) {}
+    }
+}
+
+function exitMonitorFullscreen() {
+    document.body.classList.remove('monitor-fullscreen');
+    const exitBtn = document.getElementById('monitor-exit-fullscreen');
+    if (exitBtn) exitBtn.style.display = 'none';
+    try {
+        if (document.fullscreenElement) {
+            document.exitFullscreen();
+        } else if (document.webkitFullscreenElement) {
+            document.webkitExitFullscreen();
+        }
+    } catch (_) {}
+}
+
+document.addEventListener('fullscreenchange', () => {
+    if (!document.fullscreenElement) {
+        document.body.classList.remove('monitor-fullscreen');
+        const exitBtn = document.getElementById('monitor-exit-fullscreen');
+        if (exitBtn) exitBtn.style.display = 'none';
+    }
+});
+
+document.addEventListener('webkitfullscreenchange', () => {
+    if (!document.webkitFullscreenElement) {
+        document.body.classList.remove('monitor-fullscreen');
+        const exitBtn = document.getElementById('monitor-exit-fullscreen');
+        if (exitBtn) exitBtn.style.display = 'none';
+    }
+});
+
+window.enterMonitorFullscreen = enterMonitorFullscreen;
+window.exitMonitorFullscreen = exitMonitorFullscreen;
+
+// --- Data Layer (Group 4) ---
+
+async function monitorRefresh() {
+    const WAF2_BASE = localStorage.getItem('waf2_url') || 'http://localhost:8081';
+
+    const [w1Dashboard, w2Dashboard, w1History, serversData] = await Promise.all([
+        fetch('/api/waf1/dashboard', { credentials: 'include' }).then(r => r.ok ? r.json() : null).catch(() => null),
+        fetch(`${WAF2_BASE}/waf2/dashboard`, { credentials: 'include' }).then(r => r.ok ? r.json() : null).catch(() => null),
+        fetch('/api/waf1/history', { credentials: 'include' }).then(r => r.ok ? r.json() : null).catch(() => null),
+        fetch('/api/servers', { credentials: 'include' }).then(r => r.ok ? r.json() : null).catch(() => null)
+    ]);
+
+    monitorUpdateLogStream(w1History, w2Dashboard);
+    monitorUpdateTopology(w1Dashboard, w2Dashboard, serversData);
+    monitorUpdateThreatLevel(w1Dashboard, w2Dashboard);
+    monitorUpdateOwaspChart(w1Dashboard);
+    monitorUpdateCompareChart(w1Dashboard, w2Dashboard);
+}
+
+function startMonitorRefresh() {
+    if (monitorTimer) return;
+    monitorRefresh();
+    monitorTimer = setInterval(monitorRefresh, 2500);
+}
+
+function stopMonitorRefresh() {
+    if (monitorTimer) {
+        clearInterval(monitorTimer);
+        monitorTimer = null;
+    }
+}
+
+// --- Panel Rendering (Group 5) ---
+
+function monitorFormatTime(ts) {
+    if (!ts) return '--:--:--';
+    const d = new Date(ts);
+    if (isNaN(d.getTime())) return '--:--:--';
+    return d.toLocaleTimeString('zh-CN', { hour12: false });
+}
+
+function monitorAnimateValue(el, from, to, duration = 600) {
+    if (from === to) return;
+    const start = performance.now();
+    const step = (now) => {
+        const progress = Math.min((now - start) / duration, 1);
+        const eased = 1 - Math.pow(1 - progress, 3);
+        el.textContent = Math.round(from + (to - from) * eased);
+        if (progress < 1) requestAnimationFrame(step);
+    };
+    requestAnimationFrame(step);
+}
+
+function monitorSeverityClass(sev) {
+    if (!sev) return 'monitor-sev-info';
+    const s = sev.toLowerCase();
+    if (s === 'critical') return 'monitor-sev-critical';
+    if (s === 'high') return 'monitor-sev-high';
+    if (s === 'medium') return 'monitor-sev-medium';
+    if (s === 'low') return 'monitor-sev-low';
+    return 'monitor-sev-info';
+}
+
+// 5.1 Attack Log Stream
+function monitorUpdateLogStream(waf1History, waf2) {
+    const container = document.getElementById('monitor-log-stream');
+    const emptyEl = document.getElementById('monitor-log-empty');
+    const countEl = document.getElementById('monitor-log-count');
+    if (!container) return;
+
+    const entries = [];
+
+    if (waf1History && Array.isArray(waf1History.history)) {
+        waf1History.history.forEach((h, i) => {
+            entries.push({
+                id: `w1-${h.timestamp || i}`,
+                time: h.timestamp,
+                source: 'WAF1',
+                category: h.category || h.type || 'unknown',
+                severity: h.severity || 'medium',
+                reason: h.reason || h.details || ''
+            });
+        });
+    }
+
+    if (waf2 && Array.isArray(waf2.recent_detections)) {
+        waf2.recent_detections.forEach((d, i) => {
+            entries.push({
+                id: `w2-${d.timestamp || i}`,
+                time: d.timestamp,
+                source: 'WAF2',
+                category: d.category || d.type || 'unknown',
+                severity: d.severity || 'medium',
+                reason: d.reason || d.details || ''
+            });
+        });
+    }
+
+    entries.sort((a, b) => {
+        const ta = a.time ? new Date(a.time).getTime() : 0;
+        const tb = b.time ? new Date(b.time).getTime() : 0;
+        return tb - ta;
+    });
+
+    const display = entries.slice(0, 50);
+    if (countEl) countEl.textContent = entries.length;
+
+    if (display.length === 0) {
+        if (emptyEl) emptyEl.style.display = 'flex';
+        return;
+    }
+    if (emptyEl) emptyEl.style.display = 'none';
+
+    const newIds = new Set(display.map(e => e.id));
+    const isNew = (id) => !monitorPrevLogIds.has(id);
+
+    const fragment = document.createDocumentFragment();
+    display.forEach(e => {
+        const row = document.createElement('div');
+        row.className = 'monitor-log-entry' + (isNew(e.id) ? ' flash' : '');
+        const srcClass = e.source === 'WAF1' ? 'monitor-log-source-waf1' : 'monitor-log-source-waf2';
+        row.innerHTML =
+            `<span class="monitor-log-time">${monitorFormatTime(e.time)}</span>` +
+            `<span class="monitor-log-source ${srcClass}">${e.source}</span>` +
+            `<span class="monitor-log-detail">${escapeHtml(e.category)}${e.reason ? ' — ' + escapeHtml(e.reason) : ''}</span>` +
+            `<span class="monitor-log-severity ${monitorSeverityClass(e.severity)}">${(e.severity || 'info').toUpperCase()}</span>`;
+        fragment.appendChild(row);
+    });
+
+    const children = Array.from(container.children);
+    children.forEach(c => { if (c !== emptyEl) c.remove(); });
+    container.insertBefore(fragment, emptyEl);
+    monitorPrevLogIds = newIds;
+}
+
+// 5.2 Topology
+function monitorUpdateTopology(waf1, waf2, servers) {
+    const mcpCountEl = document.getElementById('m-mcp-count');
+    if (servers) {
+        const list = servers.servers || servers;
+        if (Array.isArray(list)) {
+            const online = list.filter(s => s.status === 'connected').length;
+            if (mcpCountEl) mcpCountEl.textContent = `${online} 个在线`;
+        }
+    }
+
+    const waf1Node = document.getElementById('m-node-waf1');
+    const waf1Status = waf1Node?.querySelector('.m-node-status');
+    if (waf1 && waf1.enabled !== false) {
+        waf1Status?.classList.remove('m-status-offline');
+        waf1Status?.classList.add('m-status-online');
+    } else {
+        waf1Status?.classList.remove('m-status-online');
+        waf1Status?.classList.add('m-status-offline');
+    }
+
+    const waf2Node = document.getElementById('m-node-waf2');
+    const waf2Status = waf2Node?.querySelector('.m-node-status');
+    if (waf2) {
+        waf2Status?.classList.remove('m-status-offline');
+        waf2Status?.classList.add('m-status-online');
+    } else {
+        waf2Status?.classList.remove('m-status-online');
+        waf2Status?.classList.add('m-status-offline');
+    }
+
+    const waf1Blocked = waf1?.summary?.blocked || waf1?.stats?.blocked || 0;
+    const waf2Blocked = (waf2?.summary?.blocked || 0) + (waf2?.stats?.blocked_requests || 0) + (waf2?.stats?.blocked_responses || 0);
+
+    if (waf1Blocked > monitorPrevWaf1Blocked) {
+        monitorTriggerNodeAlert('m-node-waf1', 'm-line-agent-waf1');
+    }
+    if (waf2Blocked > monitorPrevWaf2Blocked) {
+        monitorTriggerNodeAlert('m-node-waf2', 'm-line-waf2-target');
+    }
+
+    monitorPrevWaf1Blocked = waf1Blocked;
+    monitorPrevWaf2Blocked = waf2Blocked;
+}
+
+function monitorTriggerNodeAlert(nodeId, lineId) {
+    const node = document.getElementById(nodeId);
+    const line = document.getElementById(lineId);
+    node?.classList.add('alert');
+    line?.classList.add('alert');
+    setTimeout(() => {
+        node?.classList.remove('alert');
+        line?.classList.remove('alert');
+    }, 2000);
+}
+
+// 5.3 Threat Level
+function monitorUpdateThreatLevel(waf1, waf2) {
+    const w1s = waf1?.summary || waf1?.stats || {};
+    const w2s = waf2?.summary || waf2?.stats || {};
+
+    const totalReqs = (w1s.total || 0) + (w2s.total || w2s.total_requests || 0);
+    const totalBlocked = (w1s.blocked || 0) + (w2s.blocked || 0) + (w2s.blocked_requests || 0) + (w2s.blocked_responses || 0);
+    const rate = totalReqs > 0 ? Math.round(totalBlocked / totalReqs * 100) : 0;
+
+    const rateEl = document.getElementById('monitor-block-rate');
+    if (rateEl) rateEl.innerHTML = `${rate}<span class="monitor-ring-unit">%</span>`;
+
+    const sev = { critical: 0, high: 0, medium: 0, low: 0 };
+
+    const w1Sev = waf1?.summary?.bySeverity || waf1?.stats?.bySeverity || waf1?.by_severity || {};
+    Object.entries(w1Sev).forEach(([k, v]) => {
+        const key = k.toLowerCase();
+        if (sev[key] !== undefined) sev[key] += v;
+    });
+
+    const w2Sev = waf2?.summary?.by_severity || waf2?.stats?.by_severity || waf2?.by_severity || {};
+    Object.entries(w2Sev).forEach(([k, v]) => {
+        const key = k.toLowerCase();
+        if (sev[key] !== undefined) sev[key] += v;
+    });
+
+    const maxCount = Math.max(sev.critical, sev.high, sev.medium, sev.low, 1);
+
+    ['critical', 'high', 'medium', 'low'].forEach(level => {
+        const countEl = document.getElementById(`monitor-count-${level}`);
+        const barEl = document.getElementById(`monitor-bar-${level}`);
+        if (countEl) {
+            const prev = parseInt(countEl.textContent) || 0;
+            monitorAnimateValue(countEl, prev, sev[level]);
+        }
+        if (barEl) {
+            barEl.style.width = `${Math.round(sev[level] / maxCount * 100)}%`;
+        }
+    });
+}
+
+// 5.4 OWASP Chart
+const MONITOR_GRAFANA_COLORS = [
+    '#5794f2', '#73bf69', '#e05263', '#ff9830',
+    '#b877d9', '#fade2a', '#8ab8ff', '#37872d',
+    '#c4162a', '#e0b400'
+];
+
+function monitorUpdateOwaspChart(waf1) {
+    const owasp = waf1?.stats?.owasp || waf1?.owasp || {};
+    let labels = Object.keys(owasp).filter(k => owasp[k] > 0);
+    let values = labels.map(k => owasp[k]);
+
+    if (labels.length === 0) {
+        labels = ['暂无数据'];
+        values = [0];
+    }
+
+    const ctx = document.getElementById('monitor-owasp-chart');
+    if (!ctx) return;
+
+    if (!monitorOwaspChart) {
+        monitorOwaspChart = new Chart(ctx, {
+            type: 'bar',
+            data: {
+                labels,
+                datasets: [{
+                    data: values,
+                    backgroundColor: MONITOR_GRAFANA_COLORS.slice(0, labels.length).map(c => c + '99'),
+                    borderColor: MONITOR_GRAFANA_COLORS.slice(0, labels.length),
+                    borderWidth: 1,
+                    borderRadius: 3,
+                    barPercentage: 0.7
+                }]
+            },
+            options: {
+                indexAxis: 'y',
+                responsive: true,
+                maintainAspectRatio: false,
+                plugins: { legend: { display: false } },
+                scales: {
+                    x: {
+                        grid: { color: 'rgba(240,246,252,0.04)' },
+                        ticks: { color: '#8b949e', font: { family: "'Inter'", size: 10 } }
+                    },
+                    y: {
+                        grid: { display: false },
+                        ticks: { color: '#8b949e', font: { family: "'Inter'", size: 10 } }
+                    }
+                }
+            }
+        });
+    } else {
+        monitorOwaspChart.data.labels = labels;
+        monitorOwaspChart.data.datasets[0].data = values;
+        monitorOwaspChart.data.datasets[0].backgroundColor = MONITOR_GRAFANA_COLORS.slice(0, labels.length).map(c => c + '99');
+        monitorOwaspChart.data.datasets[0].borderColor = MONITOR_GRAFANA_COLORS.slice(0, labels.length);
+        monitorOwaspChart.update('none');
+    }
+}
+
+// 5.5 WAF1 vs WAF2 Compare
+function monitorUpdateCompareChart(waf1, waf2) {
+    const w1Total = waf1?.summary?.blocked || waf1?.stats?.blocked || 0;
+    const w2Total = (waf2?.summary?.blocked || 0) + (waf2?.stats?.blocked_requests || 0) + (waf2?.stats?.blocked_responses || 0);
+
+    const w1El = document.getElementById('monitor-compare-waf1');
+    const w2El = document.getElementById('monitor-compare-waf2');
+    if (w1El) monitorAnimateValue(w1El, parseInt(w1El.textContent) || 0, w1Total);
+    if (w2El) monitorAnimateValue(w2El, parseInt(w2El.textContent) || 0, w2Total);
+
+    const w1Cat = {};
+    const w1Rules = waf1?.stats?.byRule || waf1?.rules || waf1?.by_category || {};
+    Object.entries(w1Rules).forEach(([k, v]) => { if (v > 0) w1Cat[k] = v; });
+    const w1Det = waf1?.stats?.byDetector || {};
+    Object.entries(w1Det).forEach(([k, v]) => { if (v > 0) w1Cat[k] = v; });
+
+    const w2Cat = {};
+    const w2Rules = waf2?.stats?.by_category || waf2?.by_category || {};
+    Object.entries(w2Rules).forEach(([k, v]) => { if (v > 0) w2Cat[k] = v; });
+
+    const allCategories = [...new Set([...Object.keys(w1Cat), ...Object.keys(w2Cat)])];
+    if (allCategories.length === 0) allCategories.push('暂无数据');
+
+    const w1Data = allCategories.map(c => w1Cat[c] || 0);
+    const w2Data = allCategories.map(c => w2Cat[c] || 0);
+
+    const ctx = document.getElementById('monitor-compare-chart');
+    if (!ctx) return;
+
+    if (!monitorCompareChart) {
+        monitorCompareChart = new Chart(ctx, {
+            type: 'bar',
+            data: {
+                labels: allCategories,
+                datasets: [
+                    {
+                        label: 'WAF1',
+                        data: w1Data,
+                        backgroundColor: 'rgba(87,148,242,0.7)',
+                        borderColor: '#5794f2',
+                        borderWidth: 1,
+                        borderRadius: 3,
+                        barPercentage: 0.8,
+                        categoryPercentage: 0.6
+                    },
+                    {
+                        label: 'WAF2',
+                        data: w2Data,
+                        backgroundColor: 'rgba(184,119,217,0.7)',
+                        borderColor: '#b877d9',
+                        borderWidth: 1,
+                        borderRadius: 3,
+                        barPercentage: 0.8,
+                        categoryPercentage: 0.6
+                    }
+                ]
+            },
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                plugins: {
+                    legend: {
+                        position: 'bottom',
+                        labels: { color: '#8b949e', boxWidth: 10, font: { family: "'Inter'", size: 10 } }
+                    }
+                },
+                scales: {
+                    x: {
+                        grid: { display: false },
+                        ticks: { color: '#8b949e', font: { family: "'Inter'", size: 9 }, maxRotation: 45 }
+                    },
+                    y: {
+                        grid: { color: 'rgba(240,246,252,0.04)' },
+                        ticks: { color: '#8b949e', font: { family: "'Inter'", size: 10 } }
+                    }
+                }
+            }
+        });
+    } else {
+        monitorCompareChart.data.labels = allCategories;
+        monitorCompareChart.data.datasets[0].data = w1Data;
+        monitorCompareChart.data.datasets[1].data = w2Data;
+        monitorCompareChart.update('none');
+    }
+}

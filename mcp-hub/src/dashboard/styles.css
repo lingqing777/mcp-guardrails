@@ -1709,3 +1709,490 @@ body > * { position: relative; z-index: 1; }
     .inspector-sidebar { width: 100%; }
     .grid { grid-template-columns: 1fr 1fr; }
 }
+
+/* ==================== 态势感知面板 ==================== */
+
+/* --- Grid Layout --- */
+.monitor-grid {
+    display: grid;
+    grid-template-columns: 1fr 1.2fr 0.8fr;
+    grid-template-rows: 1fr 1fr;
+    gap: 12px;
+    height: calc(100vh - 56px - 40px - 56px);
+    min-height: 480px;
+}
+
+.monitor-grid .panel-log     { grid-row: 1 / 3; }
+.monitor-grid .panel-owasp   { grid-column: 2; grid-row: 2; }
+.monitor-grid .panel-compare { grid-column: 3; grid-row: 2; }
+
+/* --- Card Base --- */
+.monitor-card {
+    background: var(--bg-surface);
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-lg);
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+    animation: monitorPanelFadeIn 0.5s ease-out both;
+}
+.monitor-card:nth-child(2) { animation-delay: 0.05s; }
+.monitor-card:nth-child(3) { animation-delay: 0.1s; }
+.monitor-card:nth-child(4) { animation-delay: 0.15s; }
+.monitor-card:nth-child(5) { animation-delay: 0.2s; }
+
+@keyframes monitorPanelFadeIn {
+    from { opacity: 0; transform: translateY(8px); }
+    to   { opacity: 1; transform: translateY(0); }
+}
+
+.monitor-card-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 10px 14px;
+    border-bottom: 1px solid var(--border-color);
+    flex-shrink: 0;
+}
+
+.monitor-card-title {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 12px;
+    font-weight: 600;
+    color: var(--text-secondary);
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+}
+
+.monitor-card-actions {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.monitor-icon {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    flex-shrink: 0;
+}
+.monitor-icon-red    { background: var(--color-red);    box-shadow: 0 0 6px var(--color-red); }
+.monitor-icon-blue   { background: var(--color-blue);   box-shadow: 0 0 6px var(--color-blue); }
+.monitor-icon-orange { background: var(--color-orange); box-shadow: 0 0 6px var(--color-orange); }
+.monitor-icon-purple { background: var(--color-purple); box-shadow: 0 0 6px var(--color-purple); }
+.monitor-icon-green  { background: var(--color-green);  box-shadow: 0 0 6px var(--color-green); }
+
+.monitor-badge {
+    font-family: 'JetBrains Mono', 'Consolas', monospace;
+    font-size: 11px;
+    font-weight: 600;
+    color: var(--color-red);
+    background: var(--color-red-dim);
+    padding: 2px 8px;
+    border-radius: 10px;
+}
+
+/* --- Fullscreen Button --- */
+.monitor-fullscreen-btn {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 28px;
+    height: 28px;
+    background: transparent;
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-sm);
+    color: var(--text-muted);
+    cursor: pointer;
+    transition: all 0.15s ease;
+}
+.monitor-fullscreen-btn:hover {
+    color: var(--text-primary);
+    border-color: var(--border-hover);
+    background: var(--bg-surface-2);
+}
+
+/* --- Log Stream --- */
+.monitor-log-stream {
+    flex: 1;
+    overflow-y: auto;
+    overflow-x: hidden;
+    padding: 4px 0;
+    scrollbar-width: thin;
+    scrollbar-color: var(--bg-surface-3) transparent;
+}
+.monitor-log-stream::-webkit-scrollbar { width: 4px; }
+.monitor-log-stream::-webkit-scrollbar-track { background: transparent; }
+.monitor-log-stream::-webkit-scrollbar-thumb { background: var(--bg-surface-3); border-radius: 2px; }
+
+.monitor-log-entry {
+    display: grid;
+    grid-template-columns: 64px 48px 1fr auto;
+    gap: 8px;
+    align-items: center;
+    padding: 6px 14px;
+    border-bottom: 1px solid rgba(240,246,252,0.03);
+    font-size: 12px;
+    animation: monitorLogSlideIn 0.3s ease-out both;
+    transition: background 0.2s ease;
+}
+.monitor-log-entry:hover { background: rgba(240,246,252,0.02); }
+.monitor-log-entry.flash {
+    animation: monitorLogSlideIn 0.3s ease-out both, monitorLogFlash 2s ease-out both;
+}
+
+.monitor-log-time {
+    font-family: 'JetBrains Mono', 'Consolas', monospace;
+    font-size: 11px;
+    color: var(--text-muted);
+}
+
+.monitor-log-source {
+    font-family: 'JetBrains Mono', 'Consolas', monospace;
+    font-size: 10px;
+    font-weight: 600;
+    padding: 1px 5px;
+    border-radius: 3px;
+    text-align: center;
+}
+.monitor-log-source-waf1 { color: var(--color-blue); background: var(--color-blue-dim); }
+.monitor-log-source-waf2 { color: var(--color-purple); background: var(--color-purple-dim); }
+
+.monitor-log-detail {
+    color: var(--text-secondary);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.monitor-log-severity {
+    font-family: 'JetBrains Mono', 'Consolas', monospace;
+    font-size: 10px;
+    font-weight: 700;
+    padding: 1px 6px;
+    border-radius: 3px;
+    text-transform: uppercase;
+    flex-shrink: 0;
+}
+.monitor-sev-critical { color: #fff; background: var(--color-red); }
+.monitor-sev-high     { color: #fff; background: var(--color-orange); }
+.monitor-sev-medium   { color: #1a1a2e; background: var(--color-orange); }
+.monitor-sev-low      { color: #fff; background: var(--color-green); }
+.monitor-sev-info     { color: var(--text-secondary); background: rgba(139,148,158,0.2); }
+
+.monitor-empty {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    height: 100%;
+    color: var(--text-muted);
+    font-size: 13px;
+}
+
+/* --- Topology --- */
+.monitor-topology-container {
+    flex: 1;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 8px;
+}
+
+#monitor-topology-svg {
+    width: 100%;
+    height: 100%;
+    max-height: 320px;
+}
+
+.m-topo-line {
+    stroke: rgba(87,148,242,0.2);
+    stroke-width: 2;
+    fill: none;
+    stroke-dasharray: 6 4;
+    transition: stroke 0.4s ease;
+}
+.m-topo-line.alert {
+    stroke: var(--color-red);
+    stroke-width: 2.5;
+    stroke-dasharray: none;
+    filter: drop-shadow(0 0 4px var(--color-red));
+}
+
+.m-topo-node rect {
+    fill: var(--bg-surface-2);
+    stroke: var(--border-color);
+    stroke-width: 1;
+    transition: stroke 0.3s ease, filter 0.3s ease;
+}
+.m-topo-node.alert rect {
+    stroke: var(--color-red);
+    filter: drop-shadow(0 0 8px rgba(224,82,99,0.4));
+    animation: monitorNodePulse 2s ease-out;
+}
+
+.m-node-label {
+    fill: var(--text-primary);
+    font-family: 'Inter', sans-serif;
+    font-size: 12px;
+    font-weight: 600;
+    text-anchor: middle;
+}
+
+.m-node-status { transition: fill 0.3s ease; }
+.m-status-online  { fill: var(--color-green); }
+.m-status-offline { fill: var(--text-muted); }
+
+.m-node-status-text {
+    fill: var(--text-muted);
+    font-family: 'Inter', sans-serif;
+    font-size: 10px;
+}
+
+.m-particle {
+    fill: var(--color-blue);
+    opacity: 0.6;
+}
+
+/* --- Threat Level --- */
+.monitor-threat-content {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    padding: 16px 14px;
+    gap: 16px;
+}
+
+.monitor-block-rate {
+    text-align: center;
+    padding: 12px 0;
+}
+
+.monitor-ring-value {
+    font-family: 'JetBrains Mono', 'Consolas', monospace;
+    font-size: 42px;
+    font-weight: 700;
+    color: var(--text-primary);
+    line-height: 1;
+    letter-spacing: -0.03em;
+}
+.monitor-ring-unit {
+    font-size: 20px;
+    color: var(--text-secondary);
+    font-weight: 500;
+}
+.monitor-ring-label {
+    font-size: 11px;
+    color: var(--text-muted);
+    margin-top: 4px;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+}
+
+.monitor-severity-bars {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    flex: 1;
+}
+
+.monitor-severity-row {
+    display: grid;
+    grid-template-columns: 68px 1fr 36px;
+    gap: 8px;
+    align-items: center;
+}
+
+.monitor-sev-label {
+    font-family: 'JetBrains Mono', 'Consolas', monospace;
+    font-size: 10px;
+    font-weight: 700;
+    letter-spacing: 0.04em;
+}
+.monitor-sev-label.monitor-sev-critical { color: var(--color-red); }
+.monitor-sev-label.monitor-sev-high     { color: var(--color-orange); }
+.monitor-sev-label.monitor-sev-medium   { color: var(--color-orange); }
+.monitor-sev-label.monitor-sev-low      { color: var(--color-green); }
+
+.monitor-sev-track {
+    height: 6px;
+    background: rgba(240,246,252,0.04);
+    border-radius: 3px;
+    overflow: hidden;
+}
+
+.monitor-sev-fill {
+    height: 100%;
+    border-radius: 3px;
+    transition: width 0.6s cubic-bezier(0.4,0,0.2,1);
+}
+.monitor-sev-fill.critical { background: var(--color-red);    box-shadow: 0 0 8px rgba(224,82,99,0.3); }
+.monitor-sev-fill.high     { background: var(--color-orange); box-shadow: 0 0 8px rgba(255,152,48,0.3); }
+.monitor-sev-fill.medium   { background: var(--color-orange); box-shadow: 0 0 8px rgba(242,204,12,0.2); }
+.monitor-sev-fill.low      { background: var(--color-green);  box-shadow: 0 0 8px rgba(115,191,105,0.2); }
+
+.monitor-sev-count {
+    font-family: 'JetBrains Mono', 'Consolas', monospace;
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--text-primary);
+    text-align: right;
+}
+
+/* --- Chart Wrap --- */
+.monitor-chart-wrap {
+    flex: 1;
+    padding: 10px 14px;
+    min-height: 0;
+}
+.monitor-chart-wrap canvas {
+    width: 100% !important;
+    height: 100% !important;
+}
+
+/* --- Compare Panel --- */
+.monitor-compare-content {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+}
+
+.monitor-compare-summary {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 16px;
+    padding: 12px 14px;
+    border-bottom: 1px solid var(--border-color);
+}
+
+.monitor-compare-layer { text-align: center; }
+
+.monitor-compare-label {
+    font-size: 10px;
+    color: var(--text-muted);
+    margin-bottom: 2px;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+}
+
+.monitor-compare-value {
+    font-family: 'JetBrains Mono', 'Consolas', monospace;
+    font-size: 24px;
+    font-weight: 700;
+    color: var(--text-primary);
+}
+
+.monitor-compare-vs {
+    font-size: 10px;
+    font-weight: 700;
+    color: var(--text-muted);
+    padding: 2px 8px;
+    border-radius: var(--radius-sm);
+    border: 1px solid var(--border-color);
+}
+
+/* ==================== 全屏模式 ==================== */
+
+/* Fullscreen transition for header and tabs */
+.header,
+.tabs {
+    transition: opacity 0.4s cubic-bezier(0.4,0,0.2,1),
+                transform 0.4s cubic-bezier(0.4,0,0.2,1);
+}
+
+body.monitor-fullscreen .header,
+body.monitor-fullscreen .tabs {
+    opacity: 0;
+    transform: translateY(-100%);
+    pointer-events: none;
+}
+
+body.monitor-fullscreen .container {
+    padding: 0;
+    max-width: none;
+}
+
+body.monitor-fullscreen #monitor-panel {
+    position: fixed;
+    inset: 0;
+    z-index: 1000;
+    background: var(--bg-body);
+    padding: 12px;
+    transition: all 0.4s cubic-bezier(0.4,0,0.2,1);
+}
+
+body.monitor-fullscreen .monitor-grid {
+    height: 100vh;
+}
+
+/* Floating exit button */
+.monitor-exit-fullscreen {
+    position: fixed;
+    top: 16px;
+    right: 16px;
+    z-index: 1100;
+    display: none;
+    align-items: center;
+    gap: 6px;
+    padding: 8px 14px;
+    background: rgba(22, 27, 34, 0.85);
+    backdrop-filter: blur(8px);
+    -webkit-backdrop-filter: blur(8px);
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-md);
+    color: var(--text-secondary);
+    font-size: 12px;
+    font-weight: 500;
+    font-family: inherit;
+    cursor: pointer;
+    transition: all 0.2s ease;
+}
+.monitor-exit-fullscreen:hover {
+    color: var(--text-primary);
+    background: rgba(22, 27, 34, 0.95);
+    border-color: var(--border-hover);
+}
+
+body.monitor-fullscreen .monitor-exit-fullscreen {
+    display: flex;
+}
+
+/* ==================== 态势感知动画 ==================== */
+
+@keyframes monitorLogSlideIn {
+    from { opacity: 0; transform: translateX(-12px); }
+    to   { opacity: 1; transform: translateX(0); }
+}
+
+@keyframes monitorLogFlash {
+    0%   { background: rgba(224,82,99,0.15); }
+    100% { background: transparent; }
+}
+
+@keyframes monitorNodePulse {
+    0%   { stroke: var(--color-red); filter: drop-shadow(0 0 12px rgba(224,82,99,0.6)); }
+    100% { stroke: var(--border-color); filter: none; }
+}
+
+/* ==================== Reduced Motion ==================== */
+
+@media (prefers-reduced-motion: reduce) {
+    .monitor-card,
+    .monitor-log-entry,
+    .m-topo-node.alert rect,
+    .monitor-sev-fill {
+        animation-duration: 0.01ms !important;
+        animation-iteration-count: 1 !important;
+        transition-duration: 0.01ms !important;
+    }
+    .m-particle { display: none; }
+}
+
+/* --- 1920+ optimization --- */
+@media (min-width: 1920px) {
+    .monitor-grid { gap: 16px; }
+    .monitor-card-header { padding: 12px 18px; }
+    .monitor-log-entry { padding: 8px 18px; }
+}
