@@ -358,19 +358,46 @@ async function logout() {
 // ==================== 标签页导航 ====================
 
 function initTabs() {
+    const indicator = document.querySelector('.tab-indicator');
+
+    function updateTabIndicator(animate = true) {
+        const activeTab = document.querySelector('.tabs > .tab.active');
+        if (!activeTab || !indicator) return;
+        if (!animate) indicator.style.transition = 'none';
+        indicator.style.width = activeTab.offsetWidth + 'px';
+        indicator.style.transform = `translateX(${activeTab.offsetLeft}px)`;
+        if (!animate) {
+            // Force reflow then restore transition
+            indicator.offsetHeight;
+            indicator.style.transition = '';
+        }
+    }
+
     document.querySelectorAll('.tabs > .tab').forEach(tab => {
         tab.addEventListener('click', () => {
+            // 跳过重复点击
+            if (tab.classList.contains('active')) return;
+
             document.querySelectorAll('.tabs > .tab').forEach(t => t.classList.remove('active'));
             tab.classList.add('active');
 
-            document.querySelectorAll('.tab-content').forEach(p => p.style.display = 'none');
+            document.querySelectorAll('.tab-content').forEach(p => {
+                p.style.display = 'none';
+                p.classList.remove('panel-entering');
+            });
             const panelId = `${tab.dataset.tab}-panel`;
             const panel = document.getElementById(panelId);
             if (panel) {
                 panel.style.display = 'block';
+                panel.classList.add('panel-entering');
+                panel.addEventListener('animationend', () => {
+                    panel.classList.remove('panel-entering');
+                }, { once: true });
             } else {
                 console.error('找不到面板:', panelId);
             }
+
+            updateTabIndicator();
 
             // 态势感知 Tab 刷新控制
             if (tab.dataset.tab === 'monitor') {
@@ -386,6 +413,9 @@ function initTabs() {
     if (activeTab && activeTab.dataset.tab === 'monitor') {
         startMonitorRefresh();
     }
+
+    // 初始定位（无动画）
+    updateTabIndicator(false);
 }
 
 // ==================== 配置管理 ====================
@@ -638,10 +668,28 @@ async function selectMode(mode) {
         card.classList.toggle('selected', card.dataset.mode === mode);
     });
 
-    document.getElementById('config-full').style.display = mode === 'full' ? 'block' : 'none';
-    document.getElementById('config-lite').style.display = mode === 'lite' ? 'block' : 'none';
-    document.getElementById('guide-full').style.display = mode === 'full' ? 'block' : 'none';
-    document.getElementById('guide-lite').style.display = mode === 'lite' ? 'block' : 'none';
+    // 带动画切换配置面板
+    const showIds = mode === 'full'
+        ? ['config-full', 'guide-full']
+        : ['config-lite', 'guide-lite'];
+    const hideIds = mode === 'full'
+        ? ['config-lite', 'guide-lite']
+        : ['config-full', 'guide-full'];
+
+    hideIds.forEach(id => {
+        const el = document.getElementById(id);
+        if (el) { el.style.display = 'none'; el.classList.remove('config-entering'); }
+    });
+    showIds.forEach(id => {
+        const el = document.getElementById(id);
+        if (el) {
+            el.style.display = 'block';
+            el.classList.add('config-entering');
+            el.addEventListener('animationend', () => {
+                el.classList.remove('config-entering');
+            }, { once: true });
+        }
+    });
 
     const waf1Column = document.getElementById('waf1-rules-column');
     if (waf1Column) {
@@ -747,8 +795,19 @@ async function toggleRuleSm(el) {
 }
 
 async function applyConfig() {
-    let targetUrl, apiKey, provider, baseUrl, model;
+    // 获取触发按钮并进入 loading 态
     const suffix = currentMode === 'full' ? '' : '-lite';
+    const configSection = document.getElementById(currentMode === 'full' ? 'config-full' : 'config-lite');
+    const applyBtn = configSection ? configSection.querySelector('.btn-primary[onclick*="applyConfig"]') : null;
+    const originalBtnText = applyBtn ? applyBtn.textContent : '';
+    if (applyBtn) {
+        applyBtn.classList.add('btn-loading');
+        applyBtn.textContent = '保存中...';
+        applyBtn.disabled = true;
+        applyBtn.style.minWidth = applyBtn.offsetWidth + 'px';
+    }
+
+    let targetUrl, apiKey, provider, baseUrl, model;
 
     targetUrl = document.getElementById(`cfg-target-url${suffix}`).value;
     apiKey = document.getElementById(`cfg-apikey${suffix}`).value;
@@ -770,6 +829,11 @@ async function applyConfig() {
     }
 
     if (targetUrl && !targetUrl.match(/^https?:\/\/.+/)) {
+        if (applyBtn) {
+            applyBtn.classList.remove('btn-loading');
+            applyBtn.textContent = originalBtnText;
+            applyBtn.disabled = false;
+        }
         showConfigStatus('config-status', 'error', '目标 URL 格式无效，请输入完整 URL (如 http://example.com)');
         return;
     }
@@ -789,6 +853,17 @@ async function applyConfig() {
             llm: Object.keys(llmConfig).length > 0 ? llmConfig : undefined
         });
         if (data.success) {
+            // 进入 success 态
+            if (applyBtn) {
+                applyBtn.classList.remove('btn-loading');
+                applyBtn.classList.add('btn-success-flash');
+                applyBtn.textContent = '已保存';
+                setTimeout(() => {
+                    applyBtn.classList.remove('btn-success-flash');
+                    applyBtn.textContent = originalBtnText;
+                    applyBtn.disabled = false;
+                }, 1500);
+            }
             if (data.synced) {
                 showConfigStatus('config-status', 'success', '配置已保存，WAF2 已同步生效');
             } else {
@@ -796,9 +871,19 @@ async function applyConfig() {
                 showConfigStatus('config-status', 'warning', `配置已保存，但 WAF2 同步失败${errorMsg}`);
             }
         } else {
+            if (applyBtn) {
+                applyBtn.classList.remove('btn-loading');
+                applyBtn.textContent = originalBtnText;
+                applyBtn.disabled = false;
+            }
             showConfigStatus('config-status', 'error', data.error || '保存失败');
         }
     } catch (e) {
+        if (applyBtn) {
+            applyBtn.classList.remove('btn-loading');
+            applyBtn.textContent = originalBtnText;
+            applyBtn.disabled = false;
+        }
         localStorage.setItem('target_url', targetUrl);
         if (apiKey) localStorage.setItem('llm_apikey', apiKey);
         showConfigStatus('config-status', 'warning', '配置已保存到本地 (MCP Hub 不可用)');
@@ -1220,11 +1305,22 @@ function renderServerDetail() {
 function initInspectorTabs() {
     document.querySelectorAll('.inspector-tab').forEach(tab => {
         tab.onclick = () => {
+            if (tab.classList.contains('active')) return;
             document.querySelectorAll('.inspector-tab').forEach(t => t.classList.remove('active'));
             tab.classList.add('active');
 
-            document.querySelectorAll('.inspector-tab-content').forEach(c => c.style.display = 'none');
-            document.getElementById(`stab-${tab.dataset.stab}`).style.display = 'block';
+            document.querySelectorAll('.inspector-tab-content').forEach(c => {
+                c.style.display = 'none';
+                c.classList.remove('panel-entering');
+            });
+            const panel = document.getElementById(`stab-${tab.dataset.stab}`);
+            if (panel) {
+                panel.style.display = 'block';
+                panel.classList.add('panel-entering');
+                panel.addEventListener('animationend', () => {
+                    panel.classList.remove('panel-entering');
+                }, { once: true });
+            }
         };
     });
 }
@@ -1461,11 +1557,20 @@ function openAddServerModal() {
     document.getElementById('server-url').value = '';
     document.getElementById('server-headers').value = '';
     selectServerType('stdio');
-    document.getElementById('server-modal').style.display = 'flex';
+    const modal = document.getElementById('server-modal');
+    modal.classList.remove('modal-closing');
+    modal.style.display = 'flex';
 }
 
 function closeServerModal() {
-    document.getElementById('server-modal').style.display = 'none';
+    const modal = document.getElementById('server-modal');
+    if (!modal || modal.style.display === 'none') return;
+    modal.classList.add('modal-closing');
+    modal.addEventListener('animationend', function handler() {
+        modal.removeEventListener('animationend', handler);
+        modal.style.display = 'none';
+        modal.classList.remove('modal-closing');
+    });
     editingServerName = null;
 }
 
@@ -1584,7 +1689,9 @@ function editCurrentServer() {
         document.getElementById('server-headers').value = serverConfig.headers ? JSON.stringify(serverConfig.headers, null, 2) : '';
     }
 
-    document.getElementById('server-modal').style.display = 'flex';
+    const modal = document.getElementById('server-modal');
+    modal.classList.remove('modal-closing');
+    modal.style.display = 'flex';
 }
 
 async function deleteCurrentServer() {
