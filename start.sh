@@ -67,4 +67,4 @@ echo "=========================================="
 echo ""
 
 # 启动 MCP Hub (前台运行)
-node ./src/utils/cli.js --port 4000 --config ../config/mcp-servers.json
+node ./src/utils/cli.js --port 4000 --config ../config/mcp-servers.json --watch

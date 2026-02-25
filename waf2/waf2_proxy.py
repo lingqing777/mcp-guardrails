@@ -26,6 +26,7 @@ HTTP 流量层 LLM 动态检测
 """
 
 from fastapi import FastAPI, Request, Response
+from fastapi.responses import JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 import httpx
 import requests
@@ -55,8 +56,10 @@ class WAF2Config:
     def __init__(self):
         self.enabled = True
         self.upstream = os.environ.get("UPSTREAM", "http://127.0.0.1:3000")
-        self.api_key = os.environ.get("QWEN_API_KEY", "")
-        self.model = os.environ.get("QWEN_MODEL", os.environ.get("LLM_MODEL", "qwen-turbo"))
+        self.api_key = os.environ.get("LLM_API_KEY", os.environ.get("QWEN_API_KEY", ""))
+        self.base_url = os.environ.get("LLM_BASE_URL", "https://dashscope.aliyuncs.com/compatible-mode/v1")
+        self.model = os.environ.get("LLM_MODEL", "qwen-turbo")
+        self.format = os.environ.get("LLM_FORMAT", "openai")
         self.request_analysis = True
         self.response_analysis = True
         self.cache_enabled = True
@@ -64,8 +67,6 @@ class WAF2Config:
 
 config = WAF2Config()
 
-# 兼容旧变量名
-QWEN_API_URL = "https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions"
 LOG_FILE = "waf2_log.json"
 
 # 配置更新模型
@@ -74,6 +75,8 @@ class ConfigUpdate(BaseModel):
     upstream: Optional[str] = None
     api_key: Optional[str] = None
     model: Optional[str] = None
+    base_url: Optional[str] = None
+    format: Optional[str] = None
     request_analysis: Optional[bool] = None
     response_analysis: Optional[bool] = None
     cache_enabled: Optional[bool] = None
@@ -201,29 +204,70 @@ RESPONSE_ANALYSIS_PROMPT = """你是一个数据泄露防护专家。分析以�
 # ==================== 核心检测函数 ====================
 
 def call_llm(prompt: str) -> str:
-    """调用 LLM API (使用动态配置)"""
-    if not config.api_key:
-        print("[WAF2] 警告: 未配置 API Key，跳过 LLM 检测")
-        return "PASS"
+    """调用 LLM API (根据 format 配置选择对应的请求构造逻辑)"""
+    base = config.base_url.rstrip("/")
+    fmt = config.format or "openai"
 
     try:
-        resp = requests.post(
-            QWEN_API_URL,
-            headers={
-                "Authorization": f"Bearer {config.api_key}",
-                "Content-Type": "application/json"
-            },
-            json={
-                "model": config.model,
-                "messages": [{"role": "user", "content": prompt}],
-                "temperature": 0,
-                "max_tokens": 100
-            },
-            timeout=30
-        )
-        return resp.json()["choices"][0]["message"]["content"].strip()
+        if fmt == "anthropic":
+            # Anthropic Claude 格式
+            url = base + "/v1/messages"
+            headers = {
+                "Content-Type": "application/json",
+                "anthropic-version": "2023-06-01",
+            }
+            if config.api_key:
+                headers["x-api-key"] = config.api_key
+            resp = requests.post(
+                url,
+                headers=headers,
+                json={
+                    "model": config.model,
+                    "messages": [{"role": "user", "content": prompt}],
+                    "max_tokens": 100
+                },
+                timeout=30
+            )
+            return resp.json()["content"][0]["text"].strip()
+
+        elif fmt == "gemini":
+            # Google Gemini 原生格式
+            url = base + f"/v1beta/models/{config.model}:generateContent"
+            headers = {"Content-Type": "application/json"}
+            if config.api_key:
+                headers["x-goog-api-key"] = config.api_key
+            resp = requests.post(
+                url,
+                headers=headers,
+                json={
+                    "contents": [{"role": "user", "parts": [{"text": prompt}]}],
+                    "generationConfig": {"temperature": 0, "maxOutputTokens": 100}
+                },
+                timeout=30
+            )
+            return resp.json()["candidates"][0]["content"]["parts"][0]["text"].strip()
+
+        else:
+            # OpenAI 兼容格式 (默认)
+            url = base + "/chat/completions"
+            headers = {"Content-Type": "application/json"}
+            if config.api_key:
+                headers["Authorization"] = f"Bearer {config.api_key}"
+            resp = requests.post(
+                url,
+                headers=headers,
+                json={
+                    "model": config.model,
+                    "messages": [{"role": "user", "content": prompt}],
+                    "temperature": 0,
+                    "max_tokens": 100
+                },
+                timeout=30
+            )
+            return resp.json()["choices"][0]["message"]["content"].strip()
+
     except Exception as e:
-        print(f"[WAF2] LLM 调用错误: {e}")
+        print(f"[WAF2] LLM 调用错误 (format={fmt}): {e}")
         return "PASS"
 
 
@@ -344,6 +388,8 @@ async def get_config():
         'enabled': config.enabled,
         'upstream': config.upstream,
         'model': config.model,
+        'base_url': config.base_url,
+        'format': config.format,
         'has_api_key': bool(config.api_key),
         'request_analysis': config.request_analysis,
         'response_analysis': config.response_analysis,
@@ -362,6 +408,10 @@ async def update_config(update: ConfigUpdate):
         config.api_key = update.api_key
     if update.model is not None:
         config.model = update.model
+    if update.base_url is not None:
+        config.base_url = update.base_url
+    if update.format is not None:
+        config.format = update.format
     if update.request_analysis is not None:
         config.request_analysis = update.request_analysis
     if update.response_analysis is not None:
@@ -369,7 +419,7 @@ async def update_config(update: ConfigUpdate):
     if update.cache_enabled is not None:
         config.cache_enabled = update.cache_enabled
 
-    print(f"[WAF2] 配置已更新: enabled={config.enabled}, upstream={config.upstream}")
+    print(f"[WAF2] 配置已更新: enabled={config.enabled}, upstream={config.upstream}, base_url={config.base_url}, format={config.format}")
     return {
         'success': True,
         'message': '配置已更新',
@@ -377,12 +427,101 @@ async def update_config(update: ConfigUpdate):
             'enabled': config.enabled,
             'upstream': config.upstream,
             'model': config.model,
+            'base_url': config.base_url,
+            'format': config.format,
             'has_api_key': bool(config.api_key),
             'request_analysis': config.request_analysis,
             'response_analysis': config.response_analysis,
             'cache_enabled': config.cache_enabled,
         }
     }
+
+
+@app.post("/waf2/test-llm")
+async def test_llm(req: Request):
+    """测试 LLM API Key 连通性"""
+    body = await req.json()
+    api_key = body.get("api_key", "")
+    base_url = body.get("base_url", "").rstrip("/")
+    model = body.get("model", "")
+    fmt = body.get("format", "openai")
+
+    if not base_url or not model:
+        return {"success": False, "error": "缺少 base_url 或 model"}
+
+    import time
+    start = time.time()
+
+    try:
+        if fmt == "anthropic":
+            url = base_url + "/v1/messages"
+            headers = {
+                "Content-Type": "application/json",
+                "anthropic-version": "2023-06-01",
+            }
+            if api_key:
+                headers["x-api-key"] = api_key
+            resp = requests.post(
+                url,
+                headers=headers,
+                json={
+                    "model": model,
+                    "messages": [{"role": "user", "content": "hi"}],
+                    "max_tokens": 5
+                },
+                timeout=15
+            )
+        elif fmt == "gemini":
+            url = base_url + f"/v1beta/models/{model}:generateContent"
+            headers = {"Content-Type": "application/json"}
+            if api_key:
+                headers["x-goog-api-key"] = api_key
+            resp = requests.post(
+                url,
+                headers=headers,
+                json={
+                    "contents": [{"role": "user", "parts": [{"text": "hi"}]}],
+                    "generationConfig": {"temperature": 0, "maxOutputTokens": 5}
+                },
+                timeout=15
+            )
+        else:
+            # OpenAI 兼容格式
+            url = base_url + "/chat/completions"
+            headers = {"Content-Type": "application/json"}
+            if api_key:
+                headers["Authorization"] = f"Bearer {api_key}"
+            resp = requests.post(
+                url,
+                headers=headers,
+                json={
+                    "model": model,
+                    "messages": [{"role": "user", "content": "hi"}],
+                    "temperature": 0,
+                    "max_tokens": 5
+                },
+                timeout=15
+            )
+
+        latency_ms = int((time.time() - start) * 1000)
+
+        if resp.status_code == 200:
+            return {"success": True, "message": f"连接成功", "latency_ms": latency_ms}
+        else:
+            error_detail = ""
+            try:
+                err_body = resp.json()
+                error_detail = err_body.get("error", {}).get("message", "") if isinstance(err_body.get("error"), dict) else str(err_body.get("error", ""))
+            except Exception:
+                error_detail = resp.text[:200]
+            return {"success": False, "error": f"HTTP {resp.status_code}: {error_detail}"}
+
+    except requests.exceptions.Timeout:
+        return {"success": False, "error": "连接超时 (15s)"}
+    except requests.exceptions.ConnectionError as e:
+        return {"success": False, "error": f"连接失败: {e}"}
+    except Exception as e:
+        return {"success": False, "error": f"请求异常: {e}"}
 
 
 @app.post("/waf2/cache/clear")
@@ -498,6 +637,17 @@ async def proxy(path: str, request: Request):
             async with httpx.AsyncClient(timeout=30.0, verify=config.verify_ssl) as client:
                 headers = {k: v for k, v in request.headers.items()
                           if k.lower() not in ["host", "content-length"]}
+
+                # 校验 header 值是否包含非 ASCII 字符
+                for k, v in headers.items():
+                    try:
+                        v.encode('ascii')
+                    except UnicodeEncodeError:
+                        return JSONResponse(
+                            status_code=400,
+                            content={"error": f"Header '{k}' contains non-ASCII characters, which is not allowed by HTTP protocol"}
+                        )
+
                 upstream_resp = await client.request(
                     request.method,
                     f"{config.upstream}/{path}",
@@ -553,6 +703,16 @@ async def proxy(path: str, request: Request):
         async with httpx.AsyncClient(timeout=30.0, verify=config.verify_ssl) as client:
             headers = {k: v for k, v in request.headers.items()
                       if k.lower() not in ["host", "content-length"]}
+
+            # 校验 header 值是否包含非 ASCII 字符
+            for k, v in headers.items():
+                try:
+                    v.encode('ascii')
+                except UnicodeEncodeError:
+                    return JSONResponse(
+                        status_code=400,
+                        content={"error": f"Header '{k}' contains non-ASCII characters, which is not allowed by HTTP protocol"}
+                    )
 
             upstream_resp = await client.request(
                 request.method,
