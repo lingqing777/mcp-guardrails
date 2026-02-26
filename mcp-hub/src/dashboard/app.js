@@ -534,6 +534,29 @@ async function refreshData() {
     updateUI();
 }
 
+async function manualRefreshData(btn) {
+    const originalText = btn.textContent;
+    btn.disabled = true;
+    btn.classList.add('btn-loading');
+    btn.textContent = '刷新中...';
+    try {
+        await refreshData();
+        btn.classList.remove('btn-loading');
+        btn.classList.add('btn-success-flash');
+        btn.textContent = '已刷新';
+        setTimeout(() => {
+            btn.classList.remove('btn-success-flash');
+            btn.textContent = originalText;
+            btn.disabled = false;
+        }, 1200);
+    } catch (e) {
+        btn.classList.remove('btn-loading');
+        btn.textContent = originalText;
+        btn.disabled = false;
+        showConfigStatus('config-status', 'error', '刷新失败: ' + e.message);
+    }
+}
+
 async function fetchWaf1Data() {
     try {
         waf1Data = await api.waf1.getDashboard();
@@ -567,6 +590,20 @@ function updateUI() {
     updateWaf1Panel();
     updateWaf2Panel();
     updateDetectionsPanel();
+    updateLLMHealthBanner();
+}
+
+function updateLLMHealthBanner() {
+    const banner = document.getElementById('llm-health-banner');
+    if (!banner) return;
+    const llmErrors = waf2Data?.summary?.llm_errors || 0;
+    if (llmErrors > 0) {
+        banner.style.display = 'flex';
+        requestAnimationFrame(() => banner.classList.add('visible'));
+    } else {
+        banner.classList.remove('visible');
+        setTimeout(() => { banner.style.display = 'none'; }, 300);
+    }
 }
 
 function updateOverview() {
@@ -847,6 +884,40 @@ async function applyConfig() {
     if (apiKey) llmConfig.apiKey = apiKey;
     if (format) llmConfig.format = format;
 
+    // ========== LLM 连通性预检 ==========
+    const skipTest = (provider === 'ollama' && !apiKey);
+    if (!skipTest && apiKey && baseUrl && model) {
+        showConfigStatus('config-status', 'info', '正在验证 API Key...');
+        try {
+            const testResult = await api.waf2.testLLMKey({ apiKey, baseUrl, model, format });
+            if (!testResult.success) {
+                const errMsg = testResult.error || 'LLM 连接失败';
+                const forceApply = confirm(`API Key 验证失败: ${errMsg}\n\n是否仍然保存配置？`);
+                if (!forceApply) {
+                    if (applyBtn) {
+                        applyBtn.classList.remove('btn-loading');
+                        applyBtn.textContent = originalBtnText;
+                        applyBtn.disabled = false;
+                    }
+                    showConfigStatus('config-status', 'warning', 'API Key 验证失败，已取消保存');
+                    return;
+                }
+            }
+        } catch (e) {
+            const forceApply = confirm(`API Key 验证不可用 (WAF2 未连接): ${e.message}\n\n是否仍然保存配置？`);
+            if (!forceApply) {
+                if (applyBtn) {
+                    applyBtn.classList.remove('btn-loading');
+                    applyBtn.textContent = originalBtnText;
+                    applyBtn.disabled = false;
+                }
+                showConfigStatus('config-status', 'warning', 'API Key 验证不可用，已取消保存');
+                return;
+            }
+        }
+        showConfigStatus('config-status', 'info', '正在保存配置...');
+    }
+
     try {
         const data = await api.waf2.updateConfig({
             upstream: targetUrl || undefined,
@@ -952,6 +1023,13 @@ async function initConfigPanel() {
                 // 用服务器保存的值覆盖预设值
                 if (baseUrlEl && llm.baseUrl) baseUrlEl.value = llm.baseUrl;
                 if (modelEl && llm.model) modelEl.value = llm.model;
+                // API Key 回填：已配置时显示占位提示
+                const apiKeyEl = document.getElementById(`cfg-apikey${suffix}`);
+                if (apiKeyEl && llm.apiKey && llm.apiKey.includes('已配置')) {
+                    apiKeyEl.value = '';
+                    apiKeyEl.placeholder = '••••••••（已配置，留空则保持不变）';
+                    apiKeyEl.dataset.configured = 'true';
+                }
                 // 自定义 Provider 时恢复 format radio 状态
                 if (llm.provider === 'custom' && llm.format) {
                     const radio = document.querySelector(`input[name="cfg-format${suffix}"][value="${llm.format}"]`);
@@ -1109,6 +1187,81 @@ async function testWaf2Connection() {
             `WAF2 连接成功! LLM调用: ${data.llm_calls || 0}, 缓存命中: ${data.cache_hit_rate || '0%'}`);
     } catch (e) {
         showConfigStatus('waf2-config-status', 'error', `WAF2 连接失败: ${e.message}`);
+    }
+}
+
+async function testLLMConfig() {
+    const suffix = currentMode === 'full' ? '' : '-lite';
+    const statusEl = document.getElementById(`llm-test-status${suffix}`);
+    const testBtn = document.getElementById(`llm-test-btn${suffix}`);
+
+    // 读取当前表单值
+    const apiKey = document.getElementById(`cfg-apikey${suffix}`)?.value || '';
+    const baseUrl = document.getElementById(`cfg-baseurl${suffix}`)?.value || '';
+    const model = document.getElementById(`cfg-model${suffix}`)?.value || '';
+
+    // 确定 format
+    const selectedCard = document.querySelector(`#provider-grid${suffix} .provider-card.selected`) ||
+                         document.querySelector(`#provider-more${suffix} .provider-card.selected`);
+    const providerKey = selectedCard ? selectedCard.dataset.provider : 'dashscope';
+    let format;
+    if (providerKey === 'custom') {
+        const checked = document.querySelector(`input[name="cfg-format${suffix}"]:checked`);
+        format = checked ? checked.value : 'openai';
+    } else {
+        const p = LLM_PROVIDERS[providerKey];
+        format = p ? p.format : 'openai';
+    }
+
+    // 前端校验
+    if (providerKey !== 'ollama' && !apiKey) {
+        if (statusEl) {
+            statusEl.textContent = '请填写 Key';
+            statusEl.className = 'llm-test-indicator error';
+        }
+        return;
+    }
+    if (!baseUrl || !model) {
+        if (statusEl) {
+            statusEl.textContent = '请选择 Provider';
+            statusEl.className = 'llm-test-indicator error';
+        }
+        return;
+    }
+
+    // Loading 态：按钮显示旋转图标
+    if (testBtn) {
+        testBtn.classList.add('testing');
+        testBtn.disabled = true;
+    }
+    if (statusEl) {
+        statusEl.textContent = '';
+        statusEl.className = 'llm-test-indicator';
+    }
+
+    try {
+        const result = await api.waf2.testLLMKey({ apiKey, baseUrl, model, format });
+        if (result.success) {
+            if (statusEl) {
+                statusEl.textContent = `✓ ${result.latency_ms}ms`;
+                statusEl.className = 'llm-test-indicator success';
+            }
+        } else {
+            if (statusEl) {
+                statusEl.textContent = '✗ ' + (result.error || '失败');
+                statusEl.className = 'llm-test-indicator error';
+            }
+        }
+    } catch (e) {
+        if (statusEl) {
+            statusEl.textContent = '✗ ' + e.message;
+            statusEl.className = 'llm-test-indicator error';
+        }
+    } finally {
+        if (testBtn) {
+            testBtn.classList.remove('testing');
+            testBtn.disabled = false;
+        }
     }
 }
 
@@ -1521,6 +1674,7 @@ window.selectModel = selectModel;
 window.toggleAutoRefresh = toggleAutoRefresh;
 window.testWaf1Connection = testWaf1Connection;
 window.testWaf2Connection = testWaf2Connection;
+window.testLLMConfig = testLLMConfig;
 window.testAllConnections = testAllConnections;
 window.resetWaf1Stats = resetWaf1Stats;
 window.resetWaf2Stats = resetWaf2Stats;
@@ -1528,6 +1682,7 @@ window.clearWaf2Cache = clearWaf2Cache;
 window.saveApiConfig = saveApiConfig;
 window.exportLogs = exportLogs;
 window.refreshData = refreshData;
+window.manualRefreshData = manualRefreshData;
 window.resetAllStats = resetAllStats;
 window.fetchMcpServers = fetchMcpServers;
 window.selectServer = selectServer;

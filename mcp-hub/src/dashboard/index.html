@@ -60,6 +60,11 @@
 
         <!-- 态势感知面板 -->
         <div id="monitor-panel" class="tab-content">
+            <!-- LLM 健康告警 Banner -->
+            <div id="llm-health-banner" class="llm-health-banner" style="display: none;">
+                <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M8 1.5L14.5 13.5H1.5L8 1.5z"/><path d="M8 6v3"/><circle cx="8" cy="11" r="0.5" fill="currentColor"/></svg>
+                <span class="llm-health-banner-text">WAF2 LLM 检测不可用 — 请检查 API Key 配置</span>
+            </div>
             <div class="monitor-grid">
                 <!-- Panel 1: Attack Log Stream (spans 2 rows) -->
                 <section class="monitor-card panel-log">
@@ -700,6 +705,8 @@
                                         <div class="input-with-copy">
                                             <input type="password" id="cfg-apikey" placeholder="sk-xxxx...">
                                             <button class="copy-btn" onclick="togglePasswordVisibility('cfg-apikey', this)" style="min-width: 60px;">显示</button>
+                                            <button class="llm-test-btn" id="llm-test-btn" onclick="testLLMConfig()" title="测试连通性">测试</button>
+                                            <span class="llm-test-indicator" id="llm-test-status"></span>
                                         </div>
                                     </div>
                                 </div>
@@ -789,6 +796,8 @@
                                         <div class="input-with-copy">
                                             <input type="password" id="cfg-apikey-lite" placeholder="sk-xxxx...">
                                             <button class="copy-btn" onclick="togglePasswordVisibility('cfg-apikey-lite', this)" style="min-width: 60px;">显示</button>
+                                            <button class="llm-test-btn" id="llm-test-btn-lite" onclick="testLLMConfig()" title="测试连通性">测试</button>
+                                            <span class="llm-test-indicator" id="llm-test-status-lite"></span>
                                         </div>
                                     </div>
                                 </div>
@@ -916,7 +925,7 @@ REST_BASE_URL=<span class="string">http://localhost:8081</span></code>
                 </div>
                 <div class="config-section-body">
                     <div class="action-group" style="margin-top: 0; padding-top: 0; border-top: none;">
-                        <button class="btn btn-primary" onclick="refreshData()">
+                        <button class="btn btn-primary" id="btn-refresh-data" onclick="manualRefreshData(this)">
                             <span>🔄</span> 刷新数据
                         </button>
                         <button class="btn btn-secondary" onclick="exportLogs()">

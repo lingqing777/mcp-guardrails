@@ -109,7 +109,19 @@ HTTP 流量层的第二道防线，通过大语言模型对请求意图和响应
   - **WHEN** 用户选择"自定义"并手动填写 Base URL 和选择 format
   - **THEN** WAF2 使用该自定义配置进行 LLM 调用
 
-- WAF2-23: LLM API 调用失败时 SHOULD 放行请求并记录错误，不应因 LLM 故障阻断正常业务
+- WAF2-23: LLM API 调用失败时 MUST 放行请求，但 MUST 返回 `"ERROR"` 状态（而非 `"PASS"`），并将错误计入 `stats['llm_errors']` 计数器。proxy 层 MUST 区分 `"PASS"`、`"BLOCK"` 和 `"ERROR"` 三种状态。
+
+  #### Scenario: LLM 调用失败 — 放行但标记 ERROR
+  - **WHEN** WAF2 已启用，`call_llm()` 因 API Key 无效或网络错误抛出异常
+  - **THEN** `call_llm()` MUST 返回字符串 `"ERROR"`
+  - **AND** `stats['llm_errors']` MUST 递增 1
+  - **AND** proxy MUST 放行请求到上游
+  - **AND** 日志 MUST 打印 `[WAF2] ⚠️ LLM 调用失败: {error}`
+
+  #### Scenario: LLM 调用成功 — 正常流程不变
+  - **WHEN** `call_llm()` 正常返回 `"PASS"` 或 `"BLOCK|..."`
+  - **THEN** proxy 按原有逻辑处理（放行或拦截）
+  - **AND** `stats['llm_errors']` 不变
 
 ### 缓存
 
@@ -130,6 +142,15 @@ HTTP 流量层的第二道防线，通过大语言模型对请求意图和响应
 - WAF2-37: 统计 MUST 追踪缓存命中次数和 LLM 调用次数
 - WAF2-38: 统计 MUST 追踪平均延迟
 - WAF2-39: 检测记录 MUST 保留最近 100 条于内存，同时写入 `waf2_log.json` 文件
+- WAF2-60: WAF2 stats MUST 新增 `llm_errors` 字段，追踪 LLM 调用失败次数。该字段 MUST 通过 `GET /waf2/stats` 和 `GET /waf2/dashboard` 接口暴露。`POST /waf2/reset` MUST 将 `llm_errors` 重置为 0。
+
+  #### Scenario: stats 接口返回 llm_errors
+  - **WHEN** 调用 `GET /waf2/stats`
+  - **THEN** 响应 JSON MUST 包含 `llm_errors` 字段（整数）
+
+  #### Scenario: reset 清零 llm_errors
+  - **WHEN** 调用 `POST /waf2/reset`
+  - **THEN** `stats['llm_errors']` MUST 重置为 0
 
 ### API 端点
 
@@ -231,7 +252,9 @@ And   请求透传到目标应用
 ```
 Given WAF2 已启用，但 LLM API Key 无效或 API 不可达
 When  收到请求
-Then  请求 SHOULD 放行（不因 LLM 故障阻断正常业务）
+Then  call_llm() 返回 "ERROR"
+And   stats['llm_errors'] 递增 1
+And   请求 MUST 放行（不因 LLM 故障阻断正常业务）
 And   错误 MUST 被记录到日志
 ```
 

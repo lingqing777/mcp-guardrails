@@ -512,13 +512,6 @@ body > * { position: relative; z-index: 1; }
     font-weight: 600;
     color: rgba(0,0,0,0.8);
     transition: width 0.6s cubic-bezier(0.4, 0, 0.2, 1);
-    width: 0;
-    animation: bar-enter 0.6s cubic-bezier(0.4, 0, 0.2, 1) forwards;
-}
-
-@keyframes bar-enter {
-    from { width: 0 !important; opacity: 0; }
-    to   { opacity: 1; }
 }
 
 .bar-fill.critical { background: var(--color-red); }
@@ -547,12 +540,6 @@ body > * { position: relative; z-index: 1; }
     margin-bottom: 8px;
     border-left: 3px solid;
     transition: transform 0.15s ease, background var(--transition);
-    animation: item-in 0.2s ease;
-}
-
-@keyframes item-in {
-    from { opacity: 0; transform: translateX(-4px); }
-    to   { opacity: 1; transform: translateX(0); }
 }
 
 .detection-item:hover { background: var(--bg-surface-3); transform: translateY(-1px); }
@@ -1627,6 +1614,53 @@ body > * { position: relative; z-index: 1; }
     padding: 0;
 }
 
+/* LLM API Key 测试按钮 */
+.llm-test-btn {
+    padding: 6px 12px;
+    background: var(--bg-surface-3);
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-md);
+    color: var(--text-secondary);
+    font-size: 12px;
+    font-weight: 500;
+    cursor: pointer;
+    transition: all var(--transition);
+    white-space: nowrap;
+    font-family: inherit;
+    min-width: 44px;
+    text-align: center;
+    position: relative;
+}
+.llm-test-btn:hover {
+    background: var(--bg-surface-2);
+    border-color: var(--border-hover);
+    color: var(--text-primary);
+}
+.llm-test-btn.testing {
+    pointer-events: none;
+    color: transparent;
+}
+.llm-test-btn.testing::after {
+    content: '';
+    position: absolute;
+    left: 50%;
+    top: 50%;
+    width: 14px;
+    height: 14px;
+    margin: -7px 0 0 -7px;
+    border: 2px solid var(--border-color);
+    border-top-color: var(--accent);
+    border-radius: 50%;
+    animation: spin 0.8s linear infinite;
+}
+.llm-test-indicator {
+    font-size: 12px;
+    white-space: nowrap;
+    flex-shrink: 0;
+}
+.llm-test-indicator.success { color: var(--color-green); }
+.llm-test-indicator.error { color: var(--color-red); }
+
 /* 带复制按钮的输入框 */
 .input-with-copy { display: flex; gap: 8px; align-items: center; }
 .input-with-copy input { flex: 1; }
@@ -1926,6 +1960,10 @@ body > * { position: relative; z-index: 1; }
     margin-top: 10px;
     animation: item-in 0.2s ease;
 }
+@keyframes item-in {
+    from { opacity: 0; transform: translateX(-4px); }
+    to   { opacity: 1; transform: translateX(0); }
+}
 .status-message.success { background: var(--color-green-dim);  border: 1px solid rgba(115,191,105,0.2); color: var(--color-green); }
 .status-message.error   { background: var(--color-red-dim);    border: 1px solid rgba(224,82,99,0.2);  color: var(--color-red); }
 .status-message.warning { background: var(--color-orange-dim); border: 1px solid rgba(242,204,12,0.2); color: var(--color-orange); }
@@ -2168,6 +2206,31 @@ body > * { position: relative; z-index: 1; }
 }
 
 /* ==================== 态势感知面板 ==================== */
+
+/* --- LLM 健康告警 Banner --- */
+.llm-health-banner {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 10px 16px;
+    margin-bottom: 12px;
+    border-radius: 8px;
+    background: var(--color-orange-dim);
+    border: 1px solid rgba(242, 204, 12, 0.2);
+    color: var(--color-orange);
+    font-size: 13px;
+    font-weight: 500;
+    opacity: 0;
+    transform: translateY(-8px);
+    transition: opacity 0.3s ease, transform 0.3s ease;
+}
+.llm-health-banner.visible {
+    opacity: 1;
+    transform: translateY(0);
+}
+.llm-health-banner svg {
+    flex-shrink: 0;
+}
 
 /* --- Grid Layout --- */
 .monitor-grid {

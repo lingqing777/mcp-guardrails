@@ -55,8 +55,14 @@ export function renderDetectionList(containerId, detections, source = 'all') {
 
     if (!detections || detections.length === 0) {
         container.innerHTML = '<div class="empty-state">暂无检测记录</div>';
+        container._lastDataKey = '';
         return;
     }
+
+    // 数据指纹：跳过无变化的重渲染
+    const dataKey = JSON.stringify(detections);
+    if (container._lastDataKey === dataKey) return;
+    container._lastDataKey = dataKey;
 
     const html = detections.map(d => renderDetectionItem(d, source)).join('');
     container.innerHTML = html;

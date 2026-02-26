@@ -16,8 +16,14 @@ export function renderBarChart(containerId, data, type = 'default') {
 
     if (!data || Object.keys(data).length === 0) {
         container.innerHTML = '<div class="empty-state">暂无数据</div>';
+        container._lastDataKey = '';
         return;
     }
+
+    // 数据指纹：跳过无变化的重渲染
+    const dataKey = JSON.stringify(data);
+    if (container._lastDataKey === dataKey) return;
+    container._lastDataKey = dataKey;
 
     const entries = Object.entries(data).sort((a, b) => b[1] - a[1]);
     const maxValue = Math.max(...entries.map(e => e[1]));
