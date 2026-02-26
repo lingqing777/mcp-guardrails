@@ -1314,9 +1314,9 @@ body > * { position: relative; z-index: 1; }
 
 .config-section-body {
     padding: 18px;
-    max-height: 800px;
+    max-height: 2000px;
     opacity: 1;
-    overflow: hidden;
+    overflow-y: auto;
     transition: max-height 0.35s ease, opacity 0.25s ease, padding 0.35s ease;
 }
 .config-section.collapsed .config-section-body {
