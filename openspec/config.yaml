@@ -1,0 +1,151 @@
+schema: spec-driven
+
+context: |
+  # MCP Guardrails — AI Agent <-> MCP Server 双层安全网关
+  # 信安作品赛参赛项目，本地部署，面向裁判演示
+
+  ## 架构概览
+  双层 WAF 串联架构：
+    Agent → MCP Hub(4000) → [WAF1 中间件] → MCP Server(stdio) → [WAF2 代理(8081)] → 目标应用
+  - Full 模式：WAF1(MCP 协议层) + WAF2(HTTP 层) 双层检测
+  - Lite 模式：仅 WAF2(HTTP 层) LLM 语义检测
+
+  ## 技术栈
+  MCP Hub:
+    - Node.js + Express 4, ESM (type: module)
+    - 入口: mcp-hub/src/utils/cli.js → mcp-hub/src/server.js
+    - 认证: Session + Cookie, bcryptjs 哈希, JSON 文件存储 (config/users.json)
+    - 无数据库, 所有持久化用 JSON 文件 (config/ 目录)
+    - 关键依赖: @modelcontextprotocol/sdk, express, yargs, bcryptjs, cookie-parser, cors
+    - 注意: express/yargs/chokidar 等在 devDependencies 中 (因为项目用 esbuild 打包)
+
+  WAF1 (静态规则引擎):
+    - 位于 mcp-hub/src/waf1/
+    - Express 中间件, 5 阶段流水线: 限流 → RBAC → 白名单 → 正则规则(10类) → 检测器(5种)
+    - 正则规则: SQL注入/Shell注入/XSS/路径穿越/敏感文件/协议攻击/数据外泄/危险操作/SSRF/其他注入
+    - 检测器: secrets(26+模式)/PII(13+类型)/Unicode异常/模糊匹配(Levenshtein)/调用链追踪
+    - LRU 缓存: 1000 条, 60s TTL
+    - 统计: 含 MITRE ATT&CK 映射和 OWASP 分类
+
+  WAF2 (LLM 语义分析):
+    - 位于 waf2/, Docker 容器部署
+    - Python + FastAPI + httpx, 反向代理架构
+    - LLM Provider 不绑定单一厂商, 用户自选 (千问/OpenAI/Anthropic/自定义兼容API)
+    - 用户提供 API Key, 在 Dashboard 配置 Provider/Model/Key/Base URL
+    - LLM 缓存: MD5 哈希, 500 条, 5min TTL
+    - 11 种攻击分类, 每类含 severity/OWASP/MITRE 映射
+
+  Dashboard:
+    - 原生 JS + CSS, 无框架 (mcp-hub/src/dashboard/)
+    - 设计语言: Grafana 暗色调(#0d1117) + Linear 极光渐变, Inter 字体
+    - 6 个 Tab: 概览/MCP Servers/WAF1/WAF2/检测记录/配置
+    - Chart.js 图表, 5秒自动刷新
+    - 登录/注册页内联在 auth.js 中 (非独立 HTML 文件)
+
+  MCP 协议处理:
+    - mcp-hub/src/mcp/server.js — 聚合多个 MCP Server 能力为统一端点
+    - 工具命名空间: server__tool 格式避免冲突
+    - 支持 stdio 和 SSE 两种 MCP 传输方式
+    - 端点: http://localhost:4000/mcp
+
+  ## 关键文件路径
+  - mcp-hub/src/server.js — 主入口, 路由注册顺序决定认证边界
+  - mcp-hub/src/utils/auth.js — 认证模块, 含内联登录/注册页 HTML (~686行)
+  - mcp-hub/src/waf1/index.js — WAF1 中间件主模块 (~326行)
+  - mcp-hub/src/waf1/rules.js — 10 类正则规则定义 (~202行)
+  - mcp-hub/src/waf1/detectors/ — secrets/pii/unicode/fuzzy 4 个检测器
+  - mcp-hub/src/waf1/call-chain.js — 调用链攻击检测 (3 种模式)
+  - mcp-hub/src/waf1/rate-limit.js — 滑动窗口限流
+  - mcp-hub/src/waf1/rbac.js — 角色权限控制
+  - mcp-hub/src/waf1/stats.js — 统计收集, 含 MITRE/OWASP 映射
+  - mcp-hub/src/dashboard/app.js — Dashboard 控制器 (~1408行)
+  - mcp-hub/src/dashboard/services/api.js — API 服务层
+  - mcp-hub/src/dashboard/styles.css — 完整 CSS 设计系统 (~1713行)
+  - waf2/waf2_proxy.py — WAF2 主程序 (~634行)
+  - config/guardrails-config.json — 全局配置 (模式/规则开关/WAF2参数)
+  - config/users.json — 用户凭据存储
+  - config/mcp-servers.json — MCP Server 定义 (command+args 或 url+headers)
+  - docker-compose.yml — WAF2 容器编排
+  - start.bat — Windows 一键启动脚本
+
+  ## 路由注册顺序 (server.js, 改动时必须遵守)
+  1. registerAuthRoutes(app) — 公开: /login, /register, /auth/*
+  2. express.static(dashboard/) — 公开: Dashboard 静态资源
+  3. registerMCPEndpointRoutes(app) — 公开: /mcp (Agent 连接点)
+  4. OAuth routes — 公开
+  5. app.use('/api', authMiddleware) — 认证分界线, 以下全部需要登录
+  6. /api/config — 配置读写
+  7. /api/waf1/* — WAF1 统计和管理
+  8. /api/mcp-config/* — MCP Server CRUD
+  9. WAF1 middleware — 应用于 /api/servers/*, /api/tools/call
+  10. /api/tools/call — 工具调用 (经过 WAF1 检测)
+  11. General API router
+
+  ## 端口和网络
+  - MCP Hub: localhost:4000 (Dashboard + API + MCP 端点)
+  - WAF2: localhost:8081 (Docker 容器, bridge 网络)
+  - WAF2 → 目标应用: 通过 host.docker.internal 访问宿主机
+  - Agent → MCP Hub: http://localhost:4000/mcp
+
+  ## Session 结构
+  { id, username, role('admin'|'viewer'), createdAt, expiresAt }
+  - Cookie: mcp_session, httpOnly, sameSite=lax
+  - 内存 Map 存储, 重启丢失
+  - 24h 过期, 每小时清理
+
+  ## WAF1 拦截响应格式
+  { error: "WAF1 拦截", reason, type: "RULE_BLOCKED"|"DETECTOR_BLOCKED"|..., category }
+
+  ## WAF2 拦截响应格式
+  { error: "WAF2 拦截", direction: "request"|"response", category, severity, reason, owasp, mitre }
+
+  ## 配置模式
+  - full: WAF1 + WAF2 双层, Dashboard 可分别开关各规则/检测器
+  - lite: 仅 WAF2 LLM 检测
+
+  ## 已知约束
+  - 本地工具, 不考虑生产部署
+  - Session 内存存储, 重启后需要重新登录
+  - WAF2 依赖外部 LLM API (用户自行提供 API Key)
+  - 前端无框架, 所有 JS 在 app.js 中 (全局函数挂 window)
+  - Dashboard 规则名映射: commandInjection(前端) = shellInjection(WAF1 内部)
+
+  ## 安全理论依据
+  - OWASP LLM01:2025 Prompt Injection: https://genai.owasp.org/llmrisk/llm01-prompt-injection/
+  - MCP Security Best Practices: https://modelcontextprotocol.io/specification/draft/basic/security_best_practices
+  - Palo Alto Unit42 MCP Attack Vectors: https://unit42.paloaltonetworks.com/model-context-protocol-attack-vectors/
+
+  ## UI 设计规范（硬性约束）
+  - 设计语言: Grafana 暗色系 + Linear 极光渐变 + Tabler 现代布局
+  - 主背景: 纯黑 (#0d1117), 拒绝花哨蓝紫渐变
+  - 配色参考: Grafana SIEM Dashboard (https://grafana.com/grafana/dashboards/21565-siem-xdr-wazuh-4-8-0/)
+  - 渐变参考: Linear.app (https://linear.app)
+  - 布局参考: Tabler (https://preview.tabler.io/)
+  - 字体: Inter, 回退系统无衬线
+  - 要求: 设计感+美术感, 减少 AI 生成痕迹, 参考成熟产品
+  - 动效: 适当的过渡动画、状态变化动效, 追求动态感和现代感
+  - 一致性: 新增 UI 必须与现有视觉风格保持统一, 不引入冲突设计语言
+
+rules:
+  proposal:
+    - 说明对 WAF1/WAF2 双层架构的影响范围
+    - 确认是否需要修改 Docker 配置或 docker-compose.yml
+    - 如果涉及新路由, 标注应插入 server.js 路由注册顺序的哪个位置
+    - 考虑对现有 Dashboard 5 秒刷新机制的影响
+  specs:
+    - 使用 Given/When/Then 格式
+    - 标注影响哪一层 (MCP Hub / WAF1 / WAF2 / Dashboard / Config)
+    - 如涉及拦截逻辑, 写明预期的响应格式和 HTTP 状态码
+    - 如涉及新检测规则, 标注 severity/OWASP/MITRE 映射
+  design:
+    - 检查 server.js 路由注册顺序, 确认不会破坏认证边界
+    - 前端改动必须保持 Grafana+Linear+Tabler 设计语言一致性
+    - UI 必须有设计感和美术感, 减少 AI 生成痕迹, 参考成熟产品的设计模式
+    - UI 必须有动态感和现代感, 包括适当的过渡动画和状态变化动效
+    - 新增 API 端点需要在 dashboard/services/api.js 中添加对应方法
+    - WAF1 新规则/检测器需要在 stats.js 的 severity 和 MITRE 映射中注册
+    - 涉及 auth.js 内联 HTML 时注意 ES 模板字符串转义
+  tasks:
+    - 每个 task 标注涉及的具体文件路径
+    - 如涉及 WAF1 中间件流水线, 标注插入的阶段编号
+    - 需要前后端联动的 task 拆分为独立子任务

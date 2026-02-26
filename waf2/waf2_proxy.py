@@ -125,6 +125,7 @@ stats = {
     'detections': [],
     'avg_latency_ms': 0,
     'total_latency_ms': 0,
+    'llm_errors': 0,
 }
 
 # ==================== OWASP 攻击分类 ====================
@@ -267,8 +268,9 @@ def call_llm(prompt: str) -> str:
             return resp.json()["choices"][0]["message"]["content"].strip()
 
     except Exception as e:
-        print(f"[WAF2] LLM 调用错误 (format={fmt}): {e}")
-        return "PASS"
+        print(f"[WAF2] ⚠️ LLM 调用失败 (format={fmt}): {e}")
+        stats['llm_errors'] += 1
+        return "ERROR"
 
 
 def analyze_request(method: str, path: str, body: str) -> Dict[str, Any]:
@@ -341,6 +343,9 @@ def analyze_response(status_code: int, body: str) -> Dict[str, Any]:
 def parse_llm_result(result: str, direction: str) -> Dict[str, Any]:
     """解析 LLM 返回结果"""
     result = result.strip().upper()
+
+    if result.startswith("ERROR"):
+        return {'blocked': False, 'direction': direction, 'llm_error': True}
 
     if result.startswith("PASS"):
         return {'blocked': False, 'direction': direction}
@@ -544,10 +549,8 @@ async def get_stats():
         'llm_calls': stats['llm_calls'],
         'cache_hit_rate': f"{(stats['cache_hits'] / max(stats['llm_calls'] + stats['cache_hits'], 1) * 100):.1f}%",
         'avg_latency_ms': f"{stats['avg_latency_ms']:.0f}",
+        'llm_errors': stats['llm_errors'],
     }
-
-
-@app.get("/waf2/dashboard")
 async def get_dashboard():
     """获取完整仪表盘数据"""
     block_rate = (stats['blocked'] / max(stats['total'], 1)) * 100
@@ -559,8 +562,8 @@ async def get_dashboard():
             'blocked': stats['blocked'],
             'block_rate': f"{block_rate:.2f}%",
             'avg_latency_ms': f"{stats['avg_latency_ms']:.0f}",
+            'llm_errors': stats['llm_errors'],
         },
-        'by_direction': {
             'request': stats['blocked_request'],
             'response': stats['blocked_response'],
         },
@@ -597,6 +600,7 @@ async def reset_stats():
     stats['detections'].clear()
     stats['avg_latency_ms'] = 0
     stats['total_latency_ms'] = 0
+    stats['llm_errors'] = 0
     return {'success': True, 'message': '统计数据已重置'}
 
 
@@ -665,6 +669,9 @@ async def proxy(path: str, request: Request):
 
     # ========== 阶段1: 请求检测 ==========
     req_result = analyze_request(request.method, f"/{path}", body)
+
+    if req_result.get('llm_error'):
+        print(f"[WAF2] ⚠️ LLM 检测降级，请求将直接放行")
 
     if req_result.get('blocked'):
         stats['blocked'] += 1
