@@ -551,6 +551,9 @@ async def get_stats():
         'avg_latency_ms': f"{stats['avg_latency_ms']:.0f}",
         'llm_errors': stats['llm_errors'],
     }
+
+
+@app.get("/waf2/dashboard")
 async def get_dashboard():
     """获取完整仪表盘数据"""
     block_rate = (stats['blocked'] / max(stats['total'], 1)) * 100
@@ -564,6 +567,7 @@ async def get_dashboard():
             'avg_latency_ms': f"{stats['avg_latency_ms']:.0f}",
             'llm_errors': stats['llm_errors'],
         },
+        'by_direction': {
             'request': stats['blocked_request'],
             'response': stats['blocked_response'],
         },
