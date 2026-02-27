@@ -872,6 +872,7 @@ async function applyConfig() {
             applyBtn.disabled = false;
         }
         showConfigStatus('config-status', 'error', '目标 URL 格式无效，请输入完整 URL (如 http://example.com)');
+        showToast('error', 'URL 格式无效', '请输入完整 URL，如 http://example.com');
         return;
     }
 
@@ -937,9 +938,11 @@ async function applyConfig() {
             }
             if (data.synced) {
                 showConfigStatus('config-status', 'success', '配置已保存，WAF2 已同步生效');
+                showToast('success', '配置已保存', 'WAF2 已同步生效');
             } else {
                 const errorMsg = data.syncError ? `: ${data.syncError}` : '';
                 showConfigStatus('config-status', 'warning', `配置已保存，但 WAF2 同步失败${errorMsg}`);
+                showToast('warning', '配置已保存', `WAF2 同步失败${errorMsg}`);
             }
         } else {
             if (applyBtn) {
@@ -948,6 +951,7 @@ async function applyConfig() {
                 applyBtn.disabled = false;
             }
             showConfigStatus('config-status', 'error', data.error || '保存失败');
+            showToast('error', '保存失败', data.error || '未知错误');
         }
     } catch (e) {
         if (applyBtn) {
@@ -958,6 +962,7 @@ async function applyConfig() {
         localStorage.setItem('target_url', targetUrl);
         if (apiKey) localStorage.setItem('llm_apikey', apiKey);
         showConfigStatus('config-status', 'warning', '配置已保存到本地 (MCP Hub 不可用)');
+        showToast('warning', '配置已保存到本地', 'MCP Hub 不可用，下次启动后生效');
     }
 }
 
@@ -975,6 +980,38 @@ function showConfigStatus(containerId, type, message) {
     setTimeout(() => {
         container.innerHTML = '';
     }, 5000);
+}
+
+/**
+ * 全局 Toast 通知
+ * @param {'success'|'error'|'warning'|'info'} type
+ * @param {string} title
+ * @param {string} [detail]
+ * @param {number} [duration=5000] ms, 0 = 手动关闭
+ */
+function showToast(type, title, detail, duration = 5000) {
+    const icons = { success: '✓', error: '✗', warning: '⚠', info: 'ℹ' };
+    const container = document.getElementById('toast-container');
+    if (!container) return;
+
+    const el = document.createElement('div');
+    el.className = `toast ${type}`;
+    el.innerHTML = `
+        <span class="toast-icon">${icons[type] || ''}</span>
+        <div class="toast-body">
+            <div class="toast-title">${escapeHtml(title)}</div>
+            ${detail ? `<div class="toast-detail">${escapeHtml(detail)}</div>` : ''}
+        </div>
+    `;
+    container.appendChild(el);
+
+    const remove = () => {
+        el.classList.add('toast-fade-out');
+        el.addEventListener('animationend', () => el.remove(), { once: true });
+    };
+
+    if (duration > 0) setTimeout(remove, duration);
+    el.onclick = remove;
 }
 
 async function initConfigPanel() {
@@ -1799,23 +1836,70 @@ async function saveServer() {
     }
 
     try {
+        const targetName = editingServerName || name;
+
         if (editingServerName) {
-            // 更新
             await api.mcpConfig.updateServer(editingServerName, serverConfig);
-            alert(`Server '${editingServerName}' 已更新，配置将在几秒后生效`);
         } else {
-            // 添加
             await api.mcpConfig.addServer(name, serverConfig);
-            alert(`Server '${name}' 已添加，配置将在几秒后生效`);
         }
 
         closeServerModal();
-        // 等待配置重新加载后刷新
-        setTimeout(() => fetchMcpServers(), 1000);
+        showToast('info', `Server '${targetName}'`, editingServerName ? '配置已更新，正在重新连接...' : '已添加，正在连接...');
+
+        // 轮询等待连接结果
+        pollServerStatus(targetName);
     } catch (e) {
         const errMsg = e.data?.error || e.message;
-        alert('保存失败: ' + errMsg);
+        showToast('error', '保存失败', errMsg, 8000);
     }
+}
+
+/**
+ * 保存后轮询 server 状态，等待连接结果并弹 toast
+ */
+function pollServerStatus(serverName, interval = 2000, timeout = 30000) {
+    const start = Date.now();
+
+    const poll = async () => {
+        try {
+            await fetchMcpServers();
+            const server = mcpServers.find(s => s.name === serverName);
+
+            if (!server) {
+                // server 还没出现在列表中，继续等
+                if (Date.now() - start < timeout) {
+                    setTimeout(poll, interval);
+                }
+                return;
+            }
+
+            if (server.status === 'connected') {
+                showToast('success', `Server '${serverName}' 连接成功`);
+                return;
+            }
+
+            if (server.status === 'error') {
+                showToast('error', `Server '${serverName}' 启动失败`, server.error || '未知错误', 8000);
+                return;
+            }
+
+            // 还在连接中 (disconnected / connecting 等)
+            if (Date.now() - start < timeout) {
+                setTimeout(poll, interval);
+            } else {
+                showToast('warning', `Server '${serverName}'`, '连接超时，请在列表中查看状态', 6000);
+            }
+        } catch (e) {
+            // 网络错误，继续重试
+            if (Date.now() - start < timeout) {
+                setTimeout(poll, interval);
+            }
+        }
+    };
+
+    // 首次等 1.5 秒让后端处理配置变更
+    setTimeout(poll, 1500);
 }
 
 function editCurrentServer() {
@@ -1858,12 +1942,12 @@ async function deleteCurrentServer() {
 
     try {
         await api.mcpConfig.deleteServer(selectedServer.name);
-        alert(`Server '${selectedServer.name}' 已删除`);
+        showToast('success', `Server '${selectedServer.name}' 已删除`);
         selectedServer = null;
         setTimeout(() => fetchMcpServers(), 1000);
     } catch (e) {
         const errMsg = e.data?.error || e.message;
-        alert('删除失败: ' + errMsg);
+        showToast('error', '删除失败', errMsg, 8000);
     }
 }
 
@@ -1947,17 +2031,16 @@ window.exitMonitorFullscreen = exitMonitorFullscreen;
 async function monitorRefresh() {
     const WAF2_BASE = localStorage.getItem('waf2_url') || 'http://localhost:8081';
 
-    const [w1Dashboard, w2Dashboard, w1History, serversData] = await Promise.all([
+    const [w1Dashboard, w2Dashboard, serversData] = await Promise.all([
         fetch('/api/waf1/dashboard', { credentials: 'include' }).then(r => r.ok ? r.json() : null).catch(() => null),
         fetch(`${WAF2_BASE}/waf2/dashboard`, { credentials: 'include' }).then(r => r.ok ? r.json() : null).catch(() => null),
-        fetch('/api/waf1/history', { credentials: 'include' }).then(r => r.ok ? r.json() : null).catch(() => null),
         fetch('/api/servers', { credentials: 'include' }).then(r => r.ok ? r.json() : null).catch(() => null)
     ]);
 
-    monitorUpdateLogStream(w1History, w2Dashboard);
+    monitorUpdateLogStream(w1Dashboard, w2Dashboard);
     monitorUpdateTopology(w1Dashboard, w2Dashboard, serversData);
     monitorUpdateThreatLevel(w1Dashboard, w2Dashboard);
-    monitorUpdateOwaspChart(w1Dashboard);
+    monitorUpdateOwaspChart(w1Dashboard, w2Dashboard);
     monitorUpdateCompareChart(w1Dashboard, w2Dashboard);
 }
 
@@ -2006,7 +2089,7 @@ function monitorSeverityClass(sev) {
 }
 
 // 5.1 Attack Log Stream
-function monitorUpdateLogStream(waf1History, waf2) {
+function monitorUpdateLogStream(waf1, waf2) {
     const container = document.getElementById('monitor-log-stream');
     const emptyEl = document.getElementById('monitor-log-empty');
     const countEl = document.getElementById('monitor-log-count');
@@ -2014,15 +2097,15 @@ function monitorUpdateLogStream(waf1History, waf2) {
 
     const entries = [];
 
-    if (waf1History && Array.isArray(waf1History.history)) {
-        waf1History.history.forEach((h, i) => {
+    if (waf1 && Array.isArray(waf1.recentDetections)) {
+        waf1.recentDetections.forEach((d, i) => {
             entries.push({
-                id: `w1-${h.timestamp || i}`,
-                time: h.timestamp,
+                id: `w1-${d.timestamp || i}`,
+                time: d.timestamp,
                 source: 'WAF1',
-                category: h.category || h.type || 'unknown',
-                severity: h.severity || 'medium',
-                reason: h.reason || h.details || ''
+                category: d.category || d.labels?.category || 'unknown',
+                severity: d.severity || d.labels?.severity || 'medium',
+                reason: d.reason || ''
             });
         });
     }
@@ -2147,7 +2230,7 @@ function monitorUpdateThreatLevel(waf1, waf2) {
 
     const sev = { critical: 0, high: 0, medium: 0, low: 0 };
 
-    const w1Sev = waf1?.summary?.bySeverity || waf1?.stats?.bySeverity || waf1?.by_severity || {};
+    const w1Sev = waf1?.last24h?.bySeverity || waf1?.summary?.bySeverity || {};
     Object.entries(w1Sev).forEach(([k, v]) => {
         const key = k.toLowerCase();
         if (sev[key] !== undefined) sev[key] += v;
@@ -2181,8 +2264,34 @@ const MONITOR_GRAFANA_COLORS = [
     '#c4162a', '#e0b400'
 ];
 
-function monitorUpdateOwaspChart(waf1) {
-    const owasp = waf1?.stats?.owasp || waf1?.owasp || {};
+const MONITOR_WAF1_OWASP_MAP = {
+    sqlInjection: 'A03:2021', shellInjection: 'A03:2021', xss: 'A03:2021',
+    pathTraversal: 'A01:2021', sensitiveFiles: 'A01:2021', dataExfiltration: 'A01:2021',
+    ssrf: 'A10:2021', dangerousOperations: 'A03:2021', protocolAttacks: 'A05:2021',
+    secrets: 'A02:2021', pii: 'A02:2021'
+};
+
+const MONITOR_WAF2_OWASP_MAP = {
+    sql_injection: 'A03:2021', command_injection: 'A03:2021', xss: 'A03:2021',
+    path_traversal: 'A01:2021', ssrf: 'A10:2021', prompt_injection: 'LLM01',
+    sensitive_data_exposure: 'A02:2021'
+};
+
+function monitorUpdateOwaspChart(waf1, waf2) {
+    const owasp = {};
+
+    const w1Cat = waf1?.last24h?.byCategory || {};
+    Object.entries(w1Cat).forEach(([cat, count]) => {
+        const code = MONITOR_WAF1_OWASP_MAP[cat];
+        if (code && count > 0) owasp[code] = (owasp[code] || 0) + count;
+    });
+
+    const w2Cat = waf2?.by_category || {};
+    Object.entries(w2Cat).forEach(([cat, count]) => {
+        const code = MONITOR_WAF2_OWASP_MAP[cat];
+        if (code && count > 0) owasp[code] = (owasp[code] || 0) + count;
+    });
+
     let labels = Object.keys(owasp).filter(k => owasp[k] > 0);
     let values = labels.map(k => owasp[k]);
 

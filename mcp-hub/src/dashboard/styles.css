@@ -1969,6 +1969,44 @@ body > * { position: relative; z-index: 1; }
 .status-message.warning { background: var(--color-orange-dim); border: 1px solid rgba(242,204,12,0.2); color: var(--color-orange); }
 .status-message.info    { background: var(--color-blue-dim);   border: 1px solid rgba(87,148,242,0.2); color: var(--color-blue); }
 
+/* ==================== Toast 通知 ==================== */
+#toast-container {
+    position: fixed;
+    top: 16px;
+    right: 16px;
+    z-index: 10000;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    pointer-events: none;
+}
+.toast {
+    pointer-events: auto;
+    min-width: 280px;
+    max-width: 420px;
+    padding: 12px 16px;
+    border-radius: var(--radius-md);
+    font-size: 12px;
+    line-height: 1.5;
+    display: flex;
+    align-items: flex-start;
+    gap: 8px;
+    box-shadow: 0 4px 12px rgba(0,0,0,0.4);
+    animation: toast-in 0.3s ease;
+    word-break: break-word;
+}
+.toast.success { background: var(--color-green-dim);  border: 1px solid rgba(115,191,105,0.3); color: var(--color-green); }
+.toast.error   { background: var(--color-red-dim);    border: 1px solid rgba(224,82,99,0.3);  color: var(--color-red); }
+.toast.warning { background: var(--color-orange-dim); border: 1px solid rgba(242,204,12,0.3); color: var(--color-orange); }
+.toast.info    { background: var(--color-blue-dim);   border: 1px solid rgba(87,148,242,0.3); color: var(--color-blue); }
+.toast-icon    { flex-shrink: 0; font-size: 14px; line-height: 1.4; }
+.toast-body    { flex: 1; }
+.toast-title   { font-weight: 600; margin-bottom: 2px; }
+.toast-detail  { opacity: 0.85; font-size: 11px; }
+.toast-fade-out { animation: toast-out 0.3s ease forwards; }
+@keyframes toast-in  { from { opacity: 0; transform: translateX(40px); } to { opacity: 1; transform: translateX(0); } }
+@keyframes toast-out { from { opacity: 1; transform: translateX(0); } to { opacity: 0; transform: translateX(40px); } }
+
 /* ==================== 错误横幅 ==================== */
 .error-banner {
     background: var(--color-red-dim);
