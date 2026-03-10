@@ -32,12 +32,11 @@ if not exist .env (
 REM Step 1: Start WAF2 Docker service
 echo.
 echo [1/3] Starting WAF2 service (Docker)...
-docker-compose up -d --build
+
+docker-compose up -d
 if errorlevel 1 (
-    echo.
-    echo [WARN] WAF2 Docker service failed to start. Is Docker Desktop running?
-    echo        Skipping WAF2, continuing with MCP Hub...
-    echo.
+    echo [INFO] Image not found, trying to build...
+    docker-compose up -d --build
 )
 
 REM Step 2: Install MCP Hub dependencies

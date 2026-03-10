@@ -1,0 +1,7 @@
+*.bat
+.env
+.env.example
+.git/
+mcp-hub/
+node_modules/
+*.log
