@@ -474,13 +474,15 @@ export class MCPConnection extends EventEmitter {
       });
     }
 
+    const coercedArgs = this._coerceArgs(tool, args);
+
     try {
       return await this.client.request(
         {
           method: "tools/call",
           params: {
             name: toolName,
-            arguments: args,
+            arguments: coercedArgs,
           },
         },
         CallToolResultSchema,
@@ -493,6 +495,50 @@ export class MCPConnection extends EventEmitter {
         args,
       });
     }
+  }
+
+  /**
+   * Coerce tool arguments to match inputSchema types.
+   * Only performs lossless conversions from string to the expected type.
+   * Returns original args if no schema or conversion not possible.
+   */
+  _coerceArgs(tool, args) {
+    if (!args || typeof args !== "object" || Array.isArray(args)) return args;
+    const properties = tool.inputSchema?.properties;
+    if (!properties) return args;
+
+    const coerced = { ...args };
+    for (const [key, schema] of Object.entries(properties)) {
+      if (!(key in coerced) || typeof coerced[key] !== "string") continue;
+      const value = coerced[key];
+      const targetType = schema.type;
+      let converted;
+
+      if ((targetType === "number" || targetType === "integer") && value !== "") {
+        const num = Number(value);
+        if (!isNaN(num) && (targetType === "number" || Number.isInteger(num))) {
+          converted = num;
+        }
+      } else if (targetType === "boolean" && (value === "true" || value === "false")) {
+        converted = value === "true";
+      } else if (targetType === "array" && value.startsWith("[")) {
+        try {
+          const parsed = JSON.parse(value);
+          if (Array.isArray(parsed)) converted = parsed;
+        } catch {}
+      } else if (targetType === "object" && value.startsWith("{")) {
+        try {
+          const parsed = JSON.parse(value);
+          if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) converted = parsed;
+        } catch {}
+      }
+
+      if (converted !== undefined) {
+        logger.debug(`[MCPConnection] coerce: tool=${tool.name}, param=${key}: ${JSON.stringify(value)} → ${JSON.stringify(converted)} (string→${targetType})`);
+        coerced[key] = converted;
+      }
+    }
+    return coerced;
   }
 
   /*
