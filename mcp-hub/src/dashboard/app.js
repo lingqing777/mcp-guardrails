@@ -1803,7 +1803,17 @@ async function saveServer() {
         serverConfig.command = command;
 
         if (argsStr) {
-            serverConfig.args = argsStr.split(',').map(s => s.trim()).filter(s => s);
+            try {
+                const parsed = JSON.parse(argsStr);
+                if (!Array.isArray(parsed)) {
+                    alert('参数必须是 JSON 数组格式，例如: ["-y", "@pkg/name"]');
+                    return;
+                }
+                serverConfig.args = parsed;
+            } catch (e) {
+                alert('参数 JSON 格式无效，例如: ["-y", "@pkg/name"]');
+                return;
+            }
         }
 
         if (envStr) {
@@ -1920,7 +1930,7 @@ function editCurrentServer() {
     if (serverConfig.command) {
         selectServerType('stdio');
         document.getElementById('server-command').value = serverConfig.command || '';
-        document.getElementById('server-args').value = (serverConfig.args || []).join(', ');
+        document.getElementById('server-args').value = (serverConfig.args && serverConfig.args.length) ? JSON.stringify(serverConfig.args, null, 2) : '';
         document.getElementById('server-env').value = serverConfig.env ? JSON.stringify(serverConfig.env, null, 2) : '';
     } else if (serverConfig.url) {
         selectServerType('sse');

@@ -454,8 +454,8 @@
                         </div>
                         <div class="form-group">
                             <label>参数</label>
-                            <input type="text" id="server-args" placeholder='例如: -y, @anthropic/mcp-server-filesystem'>
-                            <div class="hint">多个参数用逗号分隔</div>
+                            <textarea id="server-args" rows="2" placeholder='["-y", "@anthropic/mcp-server-filesystem", "/path/to/dir"]'></textarea>
+                            <div class="hint">JSON 数组格式</div>
                         </div>
                         <div class="form-group">
                             <label>环境变量</label>
