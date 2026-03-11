@@ -215,6 +215,96 @@ function runDetectors(tool, args) {
   return results;
 }
 
+// ==================== 协议无关检测函数 ====================
+
+/**
+ * 纯函数：对工具调用执行完整 WAF1 检测管线
+ * 不依赖 Express req/res，可在 HTTP API 和 MCP 协议中共用
+ *
+ * @param {string} tool - 工具名 / prompt / uri
+ * @param {object} args - 工具参数
+ * @param {object} context - { clientId, userId }
+ * @returns {{ allowed: true } | { allowed: false, status: number, error: object }}
+ */
+export function validateToolCall(tool, args, context = {}) {
+  if (!waf1Enabled) return { allowed: true };
+  if (!tool && !args) return { allowed: true };
+
+  stats.recordRequest();
+  const startTime = Date.now();
+  const source = context.source || 'unknown';
+
+  logger.info(`[WAF1] ── 检测请求: ${source} (${tool || 'unknown'}) ──`);
+
+  // Stage -1: 速率限制
+  const clientId = context.clientId || 'unknown';
+  const rateLimitResult = rateLimiter.check(clientId);
+  if (!rateLimitResult.allowed) {
+    stats.recordBlock('rateLimit');
+    logger.warn(`[WAF1] ❌ 速率限制: ${rateLimitResult.reason}`);
+    return { allowed: false, status: 429, error: { error: "WAF1 拦截", ...rateLimitResult } };
+  }
+
+  // Stage 0: RBAC
+  const userId = context.userId || 'anonymous';
+  const rbacResult = rbacController.check(userId, tool);
+  if (!rbacResult.allowed) {
+    stats.recordBlock('detector', 'rbac');
+    logger.warn(`[WAF1] ❌ RBAC 拒绝: ${rbacResult.reason}`);
+    return { allowed: false, status: 403, error: { error: "WAF1 拦截", ...rbacResult } };
+  }
+
+  // Stage 1: 白名单
+  const whitelistResult = checkWhitelist(tool, config.whitelist);
+  if (!whitelistResult.allowed) {
+    stats.recordBlock('tool');
+    logger.warn(`[WAF1] ❌ 白名单拦截: ${whitelistResult.reason}`);
+    return { allowed: false, status: 403, error: { error: "WAF1 拦截", ...whitelistResult } };
+  }
+
+  // Stage 2: 正则规则
+  const ruleResult = checkRules(args || {}, config.rules, config.rulesEnabled);
+  if (!ruleResult.allowed) {
+    stats.recordBlock('rule', ruleResult.category);
+    stats.addDetection({ tool, stage: 'rules', ...ruleResult });
+    logger.warn(`[WAF1] ❌ 规则拦截: ${ruleResult.reason}`);
+    return { allowed: false, status: 403, error: { error: "WAF1 拦截", ...ruleResult } };
+  }
+
+  // Stage 3: 检测器
+  const detectorResults = runDetectors(tool, args || {});
+  const blocked = detectorResults.filter(r => !r.allowed);
+
+  if (blocked.length > 0) {
+    const primary = blocked[0];
+    stats.addDetection({
+      tool,
+      stage: 'detector',
+      detector: primary.detector,
+      reason: primary.reason,
+      allDetections: blocked.map(b => ({ detector: b.detector, reason: b.reason })),
+    });
+
+    logger.warn(`[WAF1] ❌ 检测器拦截 [${primary.detector}]: ${primary.reason}`);
+    blocked.slice(1).forEach(b => logger.warn(`[WAF1]    + [${b.detector}]: ${b.reason}`));
+
+    return {
+      allowed: false, status: 403, error: {
+        error: "WAF1 拦截",
+        reason: primary.reason,
+        type: "DETECTOR_BLOCKED",
+        detector: primary.detector,
+        allDetections: blocked.map(b => ({ detector: b.detector, reason: b.reason })),
+      }
+    };
+  }
+
+  const elapsed = Date.now() - startTime;
+  stats.recordPass();
+  logger.info(`[WAF1] ✅ 放行: ${tool} (${elapsed}ms)`);
+  return { allowed: true };
+}
+
 // ==================== Express 中间件 ====================
 
 export function waf1Middleware(req, res, next) {
@@ -238,87 +328,19 @@ export function waf1Middleware(req, res, next) {
   const checkTarget = tool || prompt || uri;
   if (!checkTarget && !args) return next();
 
-  stats.recordRequest();
-  const startTime = Date.now();
-
-  logger.info(`[WAF1] ── 检测请求: ${req.path} (${checkTarget || 'unknown'}) ──`);
-
-  // Stage -1: 速率限制
   const clientId = req.headers['x-user-id'] || req.ip || 'unknown';
-  const rateLimitResult = rateLimiter.check(clientId);
-  if (!rateLimitResult.allowed) {
-    stats.recordBlock('rateLimit');
-    logger.warn(`[WAF1] ❌ 速率限制: ${rateLimitResult.reason}`);
-    return res.status(429).json({
-      error: "WAF1 拦截",
-      ...rateLimitResult,
-    });
-  }
-
-  // Stage 0: RBAC
   const userId = req.headers['x-user-id'] || req.body.user_id || 'anonymous';
-  const rbacResult = rbacController.check(userId, checkTarget);
-  if (!rbacResult.allowed) {
-    stats.recordBlock('detector', 'rbac');
-    logger.warn(`[WAF1] ❌ RBAC 拒绝: ${rbacResult.reason}`);
-    return res.status(403).json({
-      error: "WAF1 拦截",
-      ...rbacResult,
-    });
+
+  const result = validateToolCall(checkTarget, args, {
+    clientId,
+    userId,
+    source: req.path,
+  });
+
+  if (!result.allowed) {
+    return res.status(result.status).json(result.error);
   }
 
-  // Stage 1: 白名单
-  const whitelistResult = checkWhitelist(checkTarget, config.whitelist);
-  if (!whitelistResult.allowed) {
-    stats.recordBlock('tool');
-    logger.warn(`[WAF1] ❌ 白名单拦截: ${whitelistResult.reason}`);
-    return res.status(403).json({
-      error: "WAF1 拦截",
-      ...whitelistResult,
-    });
-  }
-
-  // Stage 2: 正则规则
-  const ruleResult = checkRules(args || {}, config.rules, config.rulesEnabled);
-  if (!ruleResult.allowed) {
-    stats.recordBlock('rule', ruleResult.category);
-    stats.addDetection({ tool: checkTarget, stage: 'rules', ...ruleResult });
-    logger.warn(`[WAF1] ❌ 规则拦截: ${ruleResult.reason}`);
-    return res.status(403).json({
-      error: "WAF1 拦截",
-      ...ruleResult,
-    });
-  }
-
-  // Stage 3: 检测器
-  const detectorResults = runDetectors(checkTarget, args || {});
-  const blocked = detectorResults.filter(r => !r.allowed);
-
-  if (blocked.length > 0) {
-    const primary = blocked[0];
-    stats.addDetection({
-      tool: checkTarget,
-      stage: 'detector',
-      detector: primary.detector,
-      reason: primary.reason,
-      allDetections: blocked.map(b => ({ detector: b.detector, reason: b.reason })),
-    });
-
-    logger.warn(`[WAF1] ❌ 检测器拦截 [${primary.detector}]: ${primary.reason}`);
-    blocked.slice(1).forEach(b => logger.warn(`[WAF1]    + [${b.detector}]: ${b.reason}`));
-
-    return res.status(403).json({
-      error: "WAF1 拦截",
-      reason: primary.reason,
-      type: "DETECTOR_BLOCKED",
-      detector: primary.detector,
-      allDetections: blocked.map(b => ({ detector: b.detector, reason: b.reason })),
-    });
-  }
-
-  const elapsed = Date.now() - startTime;
-  stats.recordPass();
-  logger.info(`[WAF1] ✅ 放行: ${checkTarget} (${elapsed}ms)`);
   next();
 }
 

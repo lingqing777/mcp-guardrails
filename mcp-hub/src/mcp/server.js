@@ -48,6 +48,7 @@ import {
 } from "@modelcontextprotocol/sdk/types.js";
 import { HubState } from "../utils/sse-manager.js";
 import logger from "../utils/logger.js";
+import { validateToolCall, isWaf1Enabled } from "../waf1/index.js";
 
 // Unique server name to identify our internal MCP endpoint
 const HUB_INTERNAL_SERVER_NAME = "mcp-hub-internal-endpoint";
@@ -255,6 +256,22 @@ export class MCPServerEndpoint {
             );
           }
           const { serverName, originalName } = registeredCap;
+
+          // WAF1 检测：仅对 tools 类型做安全检查
+          if (capType.id === 'tools' && isWaf1Enabled()) {
+            const waf1Result = validateToolCall(originalName, request.params.arguments || {}, {
+              clientId: extra?.sessionId || 'mcp-client',
+              userId: 'mcp-agent',
+              source: '/mcp',
+            });
+            if (!waf1Result.allowed) {
+              throw new McpError(
+                ErrorCode.InvalidParams,
+                waf1Result.error?.reason || 'WAF1 拦截'
+              );
+            }
+          }
+
           const request_options = {
             timeout: MCP_REQUEST_TIMEOUT
           }
