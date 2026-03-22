@@ -113,11 +113,35 @@ mcp-guardrails/
 项目提供测试靶机配置，仅用于开发测试：
 
 ```bash
-# 启动 WAF2 + 测试靶机
+# 启动 WordPress 电商靶场 (推荐，含 WooCommerce MCP 集成)
+docker-compose -f docker-compose.yml -f targets/wordpress.yml up -d
+
+# 启动其他靶机
 docker-compose -f docker-compose.yml -f targets/juice-shop.yml up -d
 ```
 
-可用靶机：`juice-shop.yml`、`dvwa.yml`、`webgoat.yml`
+可用靶机：`wordpress.yml`（推荐）、`juice-shop.yml`、`dvwa.yml`、`webgoat.yml`
+
+### WordPress 电商靶场
+
+WordPress + WooCommerce 电商网店，提供 **两类 MCP Server** 供 AI Agent 调用：
+
+| MCP Server | 传输方式 | 工具数 | 说明 |
+|------------|---------|--------|------|
+| `wordpress` | STDIO | 4 | 系统管理能力（用户列表、文件读取、媒体上传、站点配置） |
+| `woocommerce` | HTTP | 9 | 电商业务操作（商品 CRUD、订单 CRUD） |
+
+### WAF1 拦截验证
+
+通过 Dashboard 工具测试面板调用 `wordpress__mcp-adapter-execute-ability`，验证 WAF1 对以下攻击的拦截：
+
+| 攻击类型 | 测试 payload | 命中规则 |
+|----------|-------------|---------|
+| XSS | `<script>alert(1)</script>` | `/<script\b/i` |
+| SQL 注入 | `' OR 1=1 --` | `/union\s+select/i` 等 |
+| 路径遍历 | `../../etc/passwd` | `/\/etc\/passwd/i` |
+| SSRF | `http://169.254.169.254/` | `/169\.254\.\d+\.\d+/` |
+| Prompt 注入 | `Ignore previous instructions` | `/ignore\s+(previous\|above)\s+instructions/i` |
 
 ## 许可证
 

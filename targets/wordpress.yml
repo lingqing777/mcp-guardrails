@@ -1,0 +1,60 @@
+# WordPress 目标应用配置 (MCP Adapter 集成)
+#
+# 使用方法:
+#   docker-compose -f docker-compose.yml -f targets/wordpress.yml up -d
+#
+# WordPress 初始化完成后:
+#   - 站点: http://localhost:3000
+#   - 管理后台: http://localhost:3000/wp-admin
+#   - 默认登录: admin / admin123
+#   - MCP Adapter 自动安装并激活
+#
+# MCP Hub 连接:
+#   config/mcp-servers.json 中已配置 wordpress server
+#   通过 docker exec -i 连接容器内 wp-cli STDIO
+
+services:
+  wordpress:
+    image: wordpress:6.9-php8.2-apache
+    container_name: wordpress
+    ports:
+      - "3000:80"
+    environment:
+      WORDPRESS_DB_HOST: wordpress-db
+      WORDPRESS_DB_USER: wp
+      WORDPRESS_DB_PASSWORD: wp
+      WORDPRESS_DB_NAME: wordpress
+    volumes:
+      - wp_data:/var/www/html
+      - ./targets/wordpress/mu-plugins:/var/www/html/wp-content/mu-plugins
+      - ./targets/wordpress/setup.sh:/usr/local/bin/wordpress-setup.sh
+    entrypoint: ["/bin/bash", "-c", "chmod +x /usr/local/bin/wordpress-setup.sh && /usr/local/bin/wordpress-setup.sh & docker-entrypoint.sh apache2-foreground"]
+    depends_on:
+      wordpress-db:
+        condition: service_healthy
+    networks:
+      - mcp-net
+    restart: unless-stopped
+
+  wordpress-db:
+    image: mysql:8.0
+    container_name: wordpress-db
+    environment:
+      MYSQL_DATABASE: wordpress
+      MYSQL_USER: wp
+      MYSQL_PASSWORD: wp
+      MYSQL_ROOT_PASSWORD: rootpassword
+    volumes:
+      - wp_db_data:/var/lib/mysql
+    networks:
+      - mcp-net
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+volumes:
+  wp_data:
+  wp_db_data:
