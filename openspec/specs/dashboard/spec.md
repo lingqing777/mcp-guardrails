@@ -45,6 +45,19 @@
   - **WHEN** 用户按下主题切换按钮
   - **THEN** 按钮 MUST 缩放至 0.9 倍（`:active` 态）
 
+  #### Scenario: 全局按钮按压反馈
+  - **WHEN** 用户按下 Dashboard 中任意非 disabled 的 `.btn` 按钮
+  - **THEN** 按钮 MUST 缩放至 0.96 倍并在释放后恢复
+
+  #### Scenario: Tab 滑动指示条
+  - **WHEN** 用户切换 Tab
+  - **THEN** 底部 accent 色指示条 MUST 平滑滑动至目标 Tab 位置
+  - **AND** 过渡时间 MUST 为 0.3s
+
+  #### Scenario: Modal 退出动画
+  - **WHEN** 用户关闭任意 Modal
+  - **THEN** Modal 内容 MUST 以 scale + opacity 动画退出，而非瞬间消失
+
 - DASH-10: 新增 UI 元素 MUST 与现有视觉风格保持一致，不引入冲突的设计语言
 
 ### 技术栈
@@ -220,6 +233,87 @@
 - DASH-26: Server 错误状态 MUST 显示具体错误信息，不能只显示"离线"
 - DASH-27: 添加 Server 时校验失败 MUST 有即时的用户反馈
 - DASH-28: 多 Server 操作（批量连接/断开）MUST 有逐条结果反馈
+
+### 态势感知面板数据层
+
+- DASH-29: 态势感知全屏面板（Monitor）的 `monitorRefresh()` MUST 每 2.5 秒从 3 个 API 拉取数据并分发给 5 个子渲染函数：
+  - `/api/waf1/dashboard` → `w1Dashboard`
+  - `${WAF2_BASE}/waf2/dashboard` → `w2Dashboard`
+  - `/api/servers` → `serversData`
+- DASH-29.1: `/api/waf1/history` 请求 MUST 被移除，不得作为 Monitor 的攻击日志数据源
+- DASH-29.2: `monitorUpdateLogStream`、`monitorUpdateThreatLevel`、`monitorUpdateOwaspChart` MUST 接收 `w1Dashboard` 而不是 `w1History`
+
+  #### Scenario: monitorRefresh 发起 3 个并行请求
+  - **WHEN** 态势感知面板处于全屏状态且定时器触发刷新
+  - **THEN** `monitorRefresh()` SHALL 发起 3 个 `fetch` 请求（waf1/dashboard, waf2/dashboard, servers）
+  - **AND** SHALL NOT 请求 `/api/waf1/history`
+
+  #### Scenario: w1Dashboard 传入所有子函数
+  - **WHEN** 3 个 API 响应返回
+  - **THEN** `w1Dashboard` SHALL 作为第一参数传入 `monitorUpdateLogStream`、`monitorUpdateThreatLevel`、`monitorUpdateOwaspChart`
+  - **AND** `monitorUpdateLogStream` 不再接收 `w1History` 参数
+
+### 攻击日志流 Log Stream 数据源
+
+- DASH-29.3: `monitorUpdateLogStream(w1Dashboard, w2Dashboard)` MUST 从 `w1Dashboard.recentDetections[]` 和 `w2Dashboard.recent_detections[]` 提取攻击检测记录
+- DASH-29.4: 双层记录 MUST 合并后按 timestamp 降序排列，最多显示 50 条
+
+  #### Scenario: WAF1 检测事件出现在日志流中
+  - **WHEN** WAF1 已拦截攻击且 `w1Dashboard.recentDetections` 包含记录
+  - **THEN** 日志流 SHALL 显示每条 WAF1 记录，source 标记为 "WAF1"
+  - **AND** category 取自 `detection.category`，severity 取自 `detection.severity`，reason 取自 `detection.reason`
+
+  #### Scenario: WAF2 检测事件出现在日志流中
+  - **WHEN** WAF2 已拦截攻击且 `w2Dashboard.recent_detections` 包含记录
+  - **THEN** 日志流 SHALL 显示每条 WAF2 记录，source 标记为 "WAF2"
+
+  #### Scenario: 双层记录按时间混合排序
+  - **WHEN** WAF1 和 WAF2 都有检测记录
+  - **THEN** 所有记录 SHALL 合并为一个列表并按 timestamp 降序排列
+  - **AND** 日志流显示最多 50 条记录
+
+  #### Scenario: 无检测记录时显示空态
+  - **WHEN** WAF1 和 WAF2 均无检测记录
+  - **THEN** 日志流 SHALL 显示 "暂无攻击记录" 空态占位
+
+### 威胁等级面板 Threat Level 数据路径
+
+- DASH-29.5: `monitorUpdateThreatLevel(w1Dashboard, w2Dashboard)` MUST 从 `w1Dashboard.last24h.bySeverity` 和 `w2Dashboard.by_severity` 读取 severity 分布
+- DASH-29.6: critical / high / medium / low 四个等级的计数 MUST 聚合双层数据
+
+  #### Scenario: WAF1 severity 计数被正确读取
+  - **WHEN** WAF1 dashboard 返回 `{ last24h: { bySeverity: { high: 3, medium: 5 } } }`
+  - **THEN** 威胁等级面板 high 计数 SHALL 包含 WAF1 的 3 条
+  - **AND** medium 计数 SHALL 包含 WAF1 的 5 条
+
+  #### Scenario: 双层 severity 聚合
+  - **WHEN** WAF1 bySeverity 为 `{ high: 3 }` 且 WAF2 by_severity 为 `{ high: 2, critical: 1 }`
+  - **THEN** 面板显示 critical=1, high=5, medium=0, low=0
+
+  #### Scenario: WAF1 数据不可用时降级
+  - **WHEN** WAF1 dashboard API 返回 null
+  - **THEN** 威胁等级面板 SHALL 仅显示 WAF2 数据，不报错
+
+### OWASP 攻击分类图表数据构建
+
+- DASH-29.7: `monitorUpdateOwaspChart(w1Dashboard, w2Dashboard)` MUST 从 WAF1 `last24h.byCategory` 与 WAF2 `by_category` 构建 OWASP 聚合数据
+- DASH-29.8: 前端 MUST 维护 WAF1 / WAF2 category → OWASP 映射，并将相同 OWASP 编号的计数累加
+
+  #### Scenario: WAF1 分类映射为 OWASP
+  - **WHEN** WAF1 byCategory 为 `{ sqlInjection: 3, pathTraversal: 2 }`
+  - **THEN** OWASP 图表 SHALL 显示 A03:2021=3, A01:2021=2
+
+  #### Scenario: 双层数据聚合到同一 OWASP 编号
+  - **WHEN** WAF1 byCategory 含 `sqlInjection: 3` 且 WAF2 by_category 含 `sql_injection: 2`
+  - **THEN** OWASP 图表中 A03:2021 SHALL 为 5（3+2）
+
+  #### Scenario: WAF2 prompt_injection 映射为 LLM01
+  - **WHEN** WAF2 by_category 含 `prompt_injection: 4`
+  - **THEN** OWASP 图表 SHALL 包含 LLM01=4
+
+  #### Scenario: 双层数据均为空时显示占位
+  - **WHEN** WAF1 和 WAF2 的分类数据均为空或 null
+  - **THEN** OWASP 图表 SHALL 显示 "暂无数据" 占位
 
 ### WAF 规则管理
 
