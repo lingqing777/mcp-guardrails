@@ -332,21 +332,28 @@ export function registerToolsCallRoute(app, getServiceManager) {
       if (!serviceManager || !serviceManager.mcpHub) {
         return res.status(503).json({ error: "MCP Hub 未就绪" });
       }
+      if (!server_name) {
+        return res.status(400).json({ error: "缺少 server_name" });
+      }
+      if (!tool) {
+        return res.status(400).json({ error: "缺少 tool" });
+      }
 
       const connection = serviceManager.mcpHub.connections?.get(server_name);
-
       if (!connection) {
         return res.status(404).json({ error: `Server '${server_name}' 不存在` });
       }
-
       if (connection.status !== 'connected') {
         return res.status(503).json({ error: `Server '${server_name}' 未连接 (status: ${connection.status})` });
       }
 
-      const result = await connection.client.callTool({
-        name: tool,
-        arguments: args || {}
-      });
+      // Route through MCPHub.callTool so Dashboard test calls share the same
+      // argument coercion and connection wrapper behavior as other call paths.
+      const result = await serviceManager.mcpHub.callTool(
+        server_name,
+        tool,
+        args || {}
+      );
 
       res.json({ success: true, result });
     } catch (error) {

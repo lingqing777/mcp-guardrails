@@ -22,6 +22,7 @@ import logger from '../utils/logger.js';
 import { detectSecrets, detectPII, detectUnicodeAnomalies, detectFuzzyAttacks } from './detectors/index.js';
 import { checkRules, checkWhitelist, RULES, DEFAULT_RULES_ENABLED } from './rules.js';
 import { CallChainTracker } from './call-chain.js';
+import { checkDynamicPolicy } from './dynamic-policy.js';
 import { RateLimiter } from './rate-limit.js';
 import { RBACController } from './rbac.js';
 import { StatsCollector } from './stats.js';
@@ -146,9 +147,16 @@ export function resetStats() {
   stats.reset();
 }
 
+export function resetWaf1State() {
+  stats.reset();
+  cache.cache.clear();
+  callChainTracker.clear();
+  rateLimiter.store.clear();
+}
+
 // ==================== 检测管线 ====================
 
-function runDetectors(tool, args) {
+function runDetectors(tool, args, chainResult = { detected: false }) {
   const argsStr = JSON.stringify(args);
   const results = [];
 
@@ -201,11 +209,12 @@ function runDetectors(tool, args) {
   }
 
   // 5. 调用链检测
-  const chainResult = callChainTracker.check(tool, args);
   if (chainResult.detected) {
-    stats.recordBlock('detector', 'callChain');
+    const category = chainResult.category || 'callChain';
+    stats.recordBlock('detector', category);
     results.push({
-      detector: 'callChain',
+      detector: category,
+      category,
       allowed: false,
       reason: `检测到危险调用链 [${chainResult.chain}]: ${chainResult.desc}`,
       chain: chainResult,
@@ -235,6 +244,7 @@ export function validateToolCall(tool, args, context = {}) {
   const source = context.source || 'unknown';
 
   logger.info(`[WAF1] ── 检测请求: ${source} (${tool || 'unknown'}) ──`);
+  const chainResult = callChainTracker.check(tool, args || {}, context);
 
   // Stage -1: 速率限制
   const clientId = context.clientId || 'unknown';
@@ -263,7 +273,7 @@ export function validateToolCall(tool, args, context = {}) {
   }
 
   // Stage 2: 正则规则
-  const ruleResult = checkRules(args || {}, config.rules, config.rulesEnabled);
+  const ruleResult = checkRules(args || {}, config.rules, config.rulesEnabled, { tool });
   if (!ruleResult.allowed) {
     stats.recordBlock('rule', ruleResult.category);
     stats.addDetection({ tool, stage: 'rules', ...ruleResult });
@@ -271,8 +281,67 @@ export function validateToolCall(tool, args, context = {}) {
     return { allowed: false, status: 403, error: { error: "WAF1 拦截", ...ruleResult } };
   }
 
-  // Stage 3: 检测器
-  const detectorResults = runDetectors(tool, args || {});
+  // Stage 3: 调用链
+  if (chainResult.detected) {
+    const category = chainResult.category || 'callChain';
+    stats.recordBlock('detector', category);
+    stats.addDetection({
+      tool,
+      stage: 'detector',
+      category,
+      detector: category,
+      reason: `检测到危险调用链 [${chainResult.chain}]: ${chainResult.desc}`,
+      severity: 'critical',
+    });
+    logger.warn(`[WAF1] ❌ 调用链拦截 [${chainResult.chain}]: ${chainResult.desc}`);
+    return {
+      allowed: false,
+      status: 403,
+      error: {
+        error: "WAF1 拦截",
+        reason: `检测到危险调用链 [${chainResult.chain}]: ${chainResult.desc}`,
+        type: 'DETECTOR_BLOCKED',
+        category,
+        detector: category,
+      }
+    };
+  }
+
+  // Stage 4: 动态策略
+  const dynamicPolicyResult = checkDynamicPolicy(tool, args || {});
+  if (!dynamicPolicyResult.allowed) {
+    stats.recordBlock('detector', dynamicPolicyResult.category || 'dynamicPolicy');
+    stats.addDetection({
+      tool,
+      stage: 'dynamic-policy',
+      category: dynamicPolicyResult.category || 'dynamicPolicy',
+      detector: 'dynamicPolicy',
+      reason: dynamicPolicyResult.reason,
+      profile: dynamicPolicyResult.profile,
+      statementType: dynamicPolicyResult.statementType,
+      severity: dynamicPolicyResult.severity,
+      direction: dynamicPolicyResult.direction,
+    });
+    logger.warn(
+      `[WAF1] ❌ 动态策略拦截 [${dynamicPolicyResult.profile || 'dynamic-policy'}]: ${dynamicPolicyResult.reason}`
+    );
+    return {
+      allowed: false,
+      status: 403,
+      error: {
+        error: "WAF1 拦截",
+        reason: dynamicPolicyResult.reason,
+        type: dynamicPolicyResult.type || 'DYNAMIC_POLICY_BLOCKED',
+        category: dynamicPolicyResult.category || 'dynamicPolicy',
+        profile: dynamicPolicyResult.profile,
+        direction: dynamicPolicyResult.direction,
+        statementType: dynamicPolicyResult.statementType,
+      }
+    };
+  }
+
+  // Stage 5: 检测器
+  const detectorResults = runDetectors(tool, args || {}, chainResult);
   const blocked = detectorResults.filter(r => !r.allowed);
 
   if (blocked.length > 0) {
@@ -280,8 +349,10 @@ export function validateToolCall(tool, args, context = {}) {
     stats.addDetection({
       tool,
       stage: 'detector',
+      category: primary.category || primary.detector,
       detector: primary.detector,
       reason: primary.reason,
+      direction: primary.direction,
       allDetections: blocked.map(b => ({ detector: b.detector, reason: b.reason })),
     });
 

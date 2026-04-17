@@ -31,7 +31,28 @@ export const CATEGORY_SEVERITY = {
   unicode: 'low',
   fuzzy: 'medium',
   callChain: 'high',
+  dynamicPolicy: 'critical',
+  supabaseCallChain: 'critical',
   rbac: 'medium',
+};
+
+export const OWASP_MAPPING = {
+  sqlInjection: 'A03:2021',
+  shellInjection: 'A03:2021',
+  sensitiveFiles: 'A01:2021',
+  protocolAttacks: 'A05:2021',
+  dataExfiltration: 'A01:2021',
+  xss: 'A03:2021',
+  dangerousOperations: 'A03:2021',
+  pathTraversal: 'A01:2021',
+  ssrf: 'A10:2021',
+  injectionOther: 'A05:2021',
+  secrets: 'A02:2021',
+  pii: 'A02:2021',
+  callChain: 'LLM01',
+  dynamicPolicy: 'LLM01',
+  supabaseCallChain: 'LLM01',
+  rbac: 'A01:2021',
 };
 
 // MITRE ATT&CK 映射
@@ -48,6 +69,8 @@ export const MITRE_MAPPING = {
   secrets: 'T1552',
   pii: 'T1530',
   callChain: 'T1071',
+  dynamicPolicy: 'T1213',
+  supabaseCallChain: 'T1041',
 };
 
 /**
@@ -61,7 +84,16 @@ export class StatsCollector {
       blocked: 0,
       blockedByTool: 0,
       blockedByRule: {},
-      blockedByDetector: { secrets: 0, pii: 0, unicode: 0, callChain: 0, fuzzy: 0, rbac: 0 },
+      blockedByDetector: {
+        secrets: 0,
+        pii: 0,
+        unicode: 0,
+        callChain: 0,
+        supabaseCallChain: 0,
+        fuzzy: 0,
+        dynamicPolicy: 0,
+        rbac: 0,
+      },
       detections: [],
     };
   }
@@ -116,12 +148,14 @@ export class StatsCollector {
     const category = detection.category || detection.detector || 'unknown';
     const severity = CATEGORY_SEVERITY[category] || 'info';
     const mitre = MITRE_MAPPING[category] || null;
+    const owasp = OWASP_MAPPING[category] || null;
 
     return {
       'cf-waf-action': 'block',
       'cf-waf-rule-id': `waf1-${category}`,
       'cf-threat-score': SEVERITY_LEVELS[severity] * 25,
       category,
+      owasp,
       severity,
       severityScore: SEVERITY_LEVELS[severity],
       mitreTactic: mitre,
@@ -239,7 +273,16 @@ export class StatsCollector {
       blocked: 0,
       blockedByTool: 0,
       blockedByRule: {},
-      blockedByDetector: { secrets: 0, pii: 0, unicode: 0, callChain: 0, fuzzy: 0, rbac: 0 },
+      blockedByDetector: {
+        secrets: 0,
+        pii: 0,
+        unicode: 0,
+        callChain: 0,
+        supabaseCallChain: 0,
+        fuzzy: 0,
+        dynamicPolicy: 0,
+        rbac: 0,
+      },
       detections: [],
     };
     console.log("[WAF1] 统计数据已重置");

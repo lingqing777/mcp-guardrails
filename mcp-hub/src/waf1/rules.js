@@ -157,14 +157,22 @@ export const DEFAULT_RULES_ENABLED = {
  * @param {object} args - 请求参数
  * @param {object} rules - 规则定义
  * @param {object} rulesEnabled - 规则启用状态
+ * @param {object} options - 额外上下文
  * @returns {object} { allowed, reason, type, category }
  */
-export function checkRules(args, rules = RULES, rulesEnabled = DEFAULT_RULES_ENABLED) {
+export function checkRules(args, rules = RULES, rulesEnabled = DEFAULT_RULES_ENABLED, options = {}) {
   const argsStr = JSON.stringify(args);
+  const tool = String(options.tool || '').toLowerCase();
+  const isSqlAdminTool = /(^|__)execute_sql$/.test(tool) &&
+    typeof args === 'object' &&
+    typeof (args?.sql || args?.query || args?.statement) === 'string';
 
   for (const [category, patterns] of Object.entries(rules)) {
     // 检查该规则是否启用
     if (rulesEnabled && rulesEnabled[category] === false) {
+      continue;
+    }
+    if (category === 'sqlInjection' && isSqlAdminTool) {
       continue;
     }
 

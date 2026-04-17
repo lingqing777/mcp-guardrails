@@ -28,6 +28,13 @@
       "headers": {
         "X-MCP-API-Key": "ck_b0d13486896d6160c32386f0749e11878be17457:cs_ce606ffc0eca0d298ca9e55b91eade325dd77bb8"
       }
+    },
+    "supabase": {
+      "url": "https://mcp.supabase.com/mcp?project_ref=feuwoorgkgvnkdqfzsrg&read_only=true&features=database,docs",
+      "headers": {
+        "Authorization": "Bearer sbp_7a8ba77856910298f6448d6b0e1dfeaf12e2f1e2"
+      },
+      "disabled": false
     }
   }
 }

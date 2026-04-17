@@ -2278,7 +2278,8 @@ const MONITOR_WAF1_OWASP_MAP = {
     sqlInjection: 'A03:2021', shellInjection: 'A03:2021', xss: 'A03:2021',
     pathTraversal: 'A01:2021', sensitiveFiles: 'A01:2021', dataExfiltration: 'A01:2021',
     ssrf: 'A10:2021', dangerousOperations: 'A03:2021', protocolAttacks: 'A05:2021',
-    secrets: 'A02:2021', pii: 'A02:2021'
+    secrets: 'A02:2021', pii: 'A02:2021',
+    callChain: 'LLM01', dynamicPolicy: 'LLM01', supabaseCallChain: 'LLM01'
 };
 
 const MONITOR_WAF2_OWASP_MAP = {

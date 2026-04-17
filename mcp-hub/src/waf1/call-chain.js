@@ -3,6 +3,12 @@
  * 简化版 Invariant Dataflow
  */
 
+import {
+  isSupabaseLeakWriteCall,
+  isSupabaseSensitiveSqlCall,
+  isSupabaseUserWritableReadCall,
+} from './supabase-sql.js';
+
 const MAX_HISTORY = 100;
 
 // 危险调用链模式
@@ -37,6 +43,16 @@ const DANGEROUS_CHAINS = [
       { match: (call) => /exploit|inject|attack|shell|reverse/i.test(JSON.stringify(call.args)) },
     ],
   },
+  {
+    name: 'supabase_lethal_trifecta',
+    desc: '读取用户可写内容后执行敏感 SQL 并写回公开表',
+    category: 'supabaseCallChain',
+    steps: [
+      { match: (call) => isSupabaseUserWritableReadCall(call.tool, call.args) },
+      { match: (call) => isSupabaseSensitiveSqlCall(call.tool, call.args) },
+      { match: (call) => isSupabaseLeakWriteCall(call.tool, call.args) },
+    ],
+  },
 ];
 
 /**
@@ -54,36 +70,50 @@ export class CallChainTracker {
    * @param {object} args - 参数
    * @returns {object} { detected, chain, desc, calls }
    */
-  check(tool, args) {
+  check(tool, args, context = {}) {
+    const currentTs = Date.now();
+    const currentCall = {
+      tool,
+      args,
+      ts: currentTs,
+      clientId: context.clientId || 'unknown',
+    };
+
     // 记录当前调用
-    this.history.push({ tool, args, ts: Date.now() });
+    this.history.push(currentCall);
     if (this.history.length > this.maxHistory) this.history.shift();
 
     // 只检查最近 5 分钟的调用链
-    const recentCalls = this.history.filter(c => Date.now() - c.ts < 300000);
+    const recentCalls = this.history.filter((call) =>
+      currentTs - call.ts < 300000 &&
+      call.clientId === currentCall.clientId
+    );
 
     for (const chain of DANGEROUS_CHAINS) {
-      const currentCall = { tool, args };
       const lastStepIdx = chain.steps.length - 1;
 
       // 当前调用匹配链的最后一步
       if (chain.steps[lastStepIdx].match(currentCall)) {
-        // 检查之前的调用是否匹配前面的步骤
-        for (let i = recentCalls.length - 2; i >= 0; i--) {
-          for (let stepIdx = lastStepIdx - 1; stepIdx >= 0; stepIdx--) {
-            if (chain.steps[stepIdx].match(recentCalls[i])) {
-              if (stepIdx === 0) {
-                // 检测到危险调用链后，清除历史，防止后续请求持续触发
-                this.history = [];
-                return {
-                  detected: true,
-                  chain: chain.name,
-                  desc: chain.desc,
-                  calls: [recentCalls[i], currentCall],
-                };
-              }
-            }
+        const matchedCalls = [currentCall];
+        let stepIdx = lastStepIdx - 1;
+
+        for (let i = recentCalls.length - 2; i >= 0 && stepIdx >= 0; i--) {
+          if (chain.steps[stepIdx].match(recentCalls[i])) {
+            matchedCalls.unshift(recentCalls[i]);
+            stepIdx--;
           }
+        }
+
+        if (stepIdx < 0) {
+          // 检测到危险调用链后，清除历史，防止后续请求持续触发
+          this.history = [];
+          return {
+            detected: true,
+            chain: chain.name,
+            desc: chain.desc,
+            category: chain.category || 'callChain',
+            calls: matchedCalls,
+          };
         }
       }
     }
