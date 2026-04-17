@@ -65,16 +65,25 @@ start.bat
 
 ### Agent 配置
 
-在 AI Agent (Cursor/Claude Desktop 等) 中添加：
+在 AI Agent 中添加 MCP Server：
+
+**Cursor / Claude Desktop / Claude Code** (配置文件):
 
 ```json
 {
   "mcpServers": {
     "guardrails": {
+      "type": "http",
       "url": "http://localhost:4000/mcp"
     }
   }
 }
+```
+
+**Claude Code CLI** (一键添加):
+
+```bash
+claude mcp add --transport http guardrails http://localhost:4000/mcp
 ```
 
 ## 双层 WAF
@@ -142,6 +151,16 @@ WordPress + WooCommerce 电商网店，提供 **两类 MCP Server** 供 AI Agent
 | 路径遍历 | `../../etc/passwd` | `/\/etc\/passwd/i` |
 | SSRF | `http://169.254.169.254/` | `/169\.254\.\d+\.\d+/` |
 | Prompt 注入 | `Ignore previous instructions` | `/ignore\s+(previous\|above)\s+instructions/i` |
+
+### Supabase MCP 演示线
+
+仓库已预置一个禁用态的 `supabase` MCP server 配置模板，可作为第二条展示线的起点：
+
+- 展示重点：合法 SQL 工具、高权限访问、数据外泄链
+- 当前阶段：先完成目标接入和演示配置
+- 下一阶段：补动态 WAF1 / 调用链治理
+
+配置入口见 [config/mcp-servers.json](/mnt/d/Desktop/ctf/work_game/mcp-guardrails/config/mcp-servers.json)，演示说明见 [demo/supabase-lethal-trifecta.md](/mnt/d/Desktop/ctf/work_game/mcp-guardrails/demo/supabase-lethal-trifecta.md)。
 
 ## 许可证
 
