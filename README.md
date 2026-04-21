@@ -160,7 +160,7 @@ WordPress + WooCommerce 电商网店，提供 **两类 MCP Server** 供 AI Agent
 - 当前阶段：先完成目标接入和演示配置
 - 下一阶段：补动态 WAF1 / 调用链治理
 
-配置入口见 [config/mcp-servers.json](/mnt/d/Desktop/ctf/work_game/mcp-guardrails/config/mcp-servers.json)，演示说明见 [demo/supabase-lethal-trifecta.md](/mnt/d/Desktop/ctf/work_game/mcp-guardrails/demo/supabase-lethal-trifecta.md)。
+配置入口见 [config/mcp-servers.json](https://github.com/lingqing777/mcp-guardrails/blob/master/config/mcp-servers.json)，演示说明见 [demo/supabase-lethal-trifecta.md](https://github.com/lingqing777/mcp-guardrails/blob/master/demo/supabase-lethal-trifecta.md)。
 
 ## 许可证
 
