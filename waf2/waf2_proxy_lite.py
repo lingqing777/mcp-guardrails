@@ -1,5 +1,5 @@
 """
-WAF2 - MCP Guardrails HTTP 代理防火墙 (RAG + CoT 融合 · 完整版)
+WAF2 - MCP Guardrails HTTP 代理防火墙 (RAG + CoT 融合 · 轻量版 / Lite)
 HTTP 流量层 LLM 动态检测
 
 架构说明:
@@ -12,9 +12,10 @@ HTTP 流量层 LLM 动态检测
   用户的 MCP Server → WAF2 (本服务) → 目标 Web 应用
                       ↑ LLM 检测
 
-完整版 vs Lite 版差异:
-  - 完整版 (本文件): AGENT_TOOLS 额外含 rag_search, Agent 在解码后可对解码明文做二次 RAG 检索
-  - Lite 版 (waf2_proxy_lite.py): 仅在 Agent 推理前在 prompt 头部静态注入 RAG 证据, 无 rag_search 工具
+Lite 版 vs 完整版差异:
+  - Lite 版 (本文件): RAG 证据仅在 Agent 推理前一次性注入 prompt 头部, AGENT_TOOLS 只含 4 个解码工具
+  - 完整版 (waf2_proxy.py): 多 1 个 rag_search 工具, Agent 在解码后可对解码明文做二次 RAG 检索
+适用场景: RAG 检索成本敏感 / 调试 / 简单稳健的默认部署。
 
 检测流水线:
   请求进入
@@ -34,12 +35,6 @@ HTTP 流量层 LLM 动态检测
   阶段3b: RAG (仅 rag_scope=all 时) + Agent 响应推理
     ↓
   阶段4: 返回响应
-
-参考:
-- MCP-Guard 论文 Stage 2/3
-- OWASP GenAI Security Project
-- Invariant Guardrails
-- REFINE_PROMPT (Definition + Indicators + Few-shot 风格)
 """
 
 from fastapi import FastAPI, Request, Response
@@ -56,9 +51,8 @@ from datetime import datetime
 from typing import Optional, Dict, Any
 from collections import defaultdict
 
-app = FastAPI(title="WAF2 - MCP Guardrails (RAG+CoT Full)")
+app = FastAPI(title="WAF2 - MCP Guardrails (RAG+CoT Lite)")
 
-# CORS 支持前端访问
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -73,7 +67,6 @@ from pydantic import BaseModel
 
 
 class WAF2Config:
-    """动态配置 (可通过 /waf2/config API 修改)"""
     def __init__(self):
         self.enabled = True
         self.upstream = os.environ.get("UPSTREAM", "http://127.0.0.1:3000")
@@ -85,17 +78,13 @@ class WAF2Config:
         self.response_analysis = True
         self.cache_enabled = True
         self.verify_ssl = os.environ.get("VERIFY_SSL", "true").lower() == "true"
-        # 评估模式: 命中拦截逻辑保持不变, 未拦截请求不转发上游, 直接返回本地 200
         self.eval_mode = os.environ.get("EVAL_MODE", "false").lower() == "true"
-        # 评估模式下严格策略: 当 LLM 失败/不确定时 fail-closed
         self.eval_fail_closed = os.environ.get("EVAL_FAIL_CLOSED", "false").lower() == "true"
-        # RAG 知识增强配置
         self.rag_enabled = os.environ.get("RAG_ENABLED", "true").lower() == "true"
-        self.rag_scope = os.environ.get("RAG_SCOPE", "request").lower()  # request | all
+        self.rag_scope = os.environ.get("RAG_SCOPE", "request").lower()
         self.rag_top_k = int(os.environ.get("RAG_TOP_K", "5"))
         self.rag_threshold = float(os.environ.get("RAG_THRESHOLD", "0.60"))
         self.rag_confidence_threshold = float(os.environ.get("RAG_CONFIDENCE_THRESHOLD", "0.70"))
-        # Agent 迭代深度
         self.agent_max_iters_request = int(os.environ.get("AGENT_MAX_ITERS_REQUEST", "4"))
         self.agent_max_iters_response = int(os.environ.get("AGENT_MAX_ITERS_RESPONSE", "3"))
 
@@ -128,7 +117,6 @@ class ConfigUpdate(BaseModel):
 # ==================== 缓存机制 ====================
 
 class LLMCache:
-    """LLM 结果缓存，避免重复调用"""
     def __init__(self, max_size=500, ttl_seconds=300):
         self.cache = {}
         self.max_size = max_size
@@ -172,20 +160,17 @@ stats = {
     'total_latency_ms': 0,
     'llm_errors': 0,
     'llm_parse_failed': 0,
-    # RAG 统计
     'rag_queries': 0,
     'rag_errors': 0,
     'rag_empty_results': 0,
     'rag_gated': 0,
     'rag_total_latency_ms': 0.0,
-    # Agent 统计
     'agent_invocations': 0,
     'agent_tool_calls': defaultdict(int),
     'agent_salvaged': 0,
 }
 
 # ==================== RAG 知识增强 ====================
-# 启动时加载 RAG 引擎, 失败则自动禁用 (不阻塞 WAF2 启动)
 
 rag_engine = None
 if config.rag_enabled:
@@ -214,7 +199,6 @@ if config.rag_enabled:
 
 
 def format_retrieved_context_fallback(results) -> str:
-    """rag_engine 未加载时的空实现"""
     return "(无相似案例，凭自身知识判断)"
 
 
@@ -240,10 +224,9 @@ ATTACK_CATEGORIES = {
 
 SEVERITY_SCORES = {'critical': 4, 'high': 3, 'medium': 2, 'low': 1, 'info': 0}
 
-# ==================== 静态规则预筛查 (层 1: 正则) ====================
+# ==================== 静态规则 (层 1: 正则) ====================
 
 STATIC_RULES = [
-    # Path traversal
     {
         'pattern': re.compile(r'(?:\.\./|\.\.\\|%2e%2e[/\\%])', re.IGNORECASE),
         'fields': ['url', 'body'],
@@ -262,50 +245,42 @@ STATIC_RULES = [
         'category': 'path_traversal',
         'reason': '检测到敏感文件访问',
     },
-    # SSRF
     {
         'pattern': re.compile(r'(?:127\.0\.0\.1|0\.0\.0\.0|localhost[:/]|169\.254\.\d+\.\d+|10\.\d+\.\d+\.\d+|172\.(?:1[6-9]|2\d|3[01])\.\d+\.\d+|192\.168\.\d+\.\d+)', re.IGNORECASE),
         'fields': ['url', 'body'],
         'category': 'ssrf',
         'reason': '检测到内网/本地地址访问',
     },
-    # SQL injection
     {
         'pattern': re.compile(r"(?:union\s+(?:all\s+)?select\b|'\s*or\s+['\d]|'\s*and\s+['\d]|;\s*drop\s+table\b|;\s*delete\s+from\b|'\s*;\s*--|sleep\s*\(\s*\d+\s*\)|benchmark\s*\()", re.IGNORECASE),
         'fields': ['url', 'body'],
         'category': 'sql_injection',
         'reason': '检测到 SQL 注入语句',
     },
-    # Command injection
     {
         'pattern': re.compile(r'(?:;\s*(?:ls|cat|whoami|id|rm|wget|curl|bash|sh|nc|python|perl|php)\b|\|\s*(?:ls|cat|whoami|id|bash|sh|nc)\b|`[^`]+`|\$\([^)]+\))', re.IGNORECASE),
         'fields': ['url', 'body'],
         'category': 'command_injection',
         'reason': '检测到命令注入',
     },
-    # XSS
     {
         'pattern': re.compile(r'(?:<script[\s>]|javascript\s*:|on(?:load|error|click|mouseover|focus)\s*=)', re.IGNORECASE),
         'fields': ['url', 'body'],
         'category': 'xss',
         'reason': '检测到跨站脚本攻击',
     },
-    # Prompt injection (英文)
-    # 显形 PI 模板由静态层零延迟拦截; 灰样本 (变体/编码/语义级) 下沉到 RAG+Agent 处理
     {
         'pattern': re.compile(r'(?:ignore\s+(?:previous|above|all|prior)\s+instructions?|disregard\s+(?:previous|your|all)\s+instructions?|you\s+are\s+now\s+|new\s+instructions?\s*:|system\s*prompt|jailbreak)', re.IGNORECASE),
         'fields': ['body'],
         'category': 'prompt_injection',
         'reason': '检测到提示词注入攻击',
     },
-    # Prompt injection (中文)
     {
         'pattern': re.compile(r'(?:忽略(?:以上|之前|所有|上面|前面)(?:的)?(?:指令|规则|提示|约束|限制)|无视(?:以上|之前|所有)(?:的)?(?:指令|规则)|你现在是|新的指令|请忽略|角色扮演|假装你是|不要遵守)'),
         'fields': ['body'],
         'category': 'prompt_injection',
         'reason': '检测到中文提示词注入攻击',
     },
-    # XXE
     {
         'pattern': re.compile(r'(?:<!DOCTYPE\s+\w+\s*\[|<!ENTITY\s+|SYSTEM\s+["\'])', re.IGNORECASE),
         'fields': ['body'],
@@ -316,7 +291,6 @@ STATIC_RULES = [
 
 
 def static_rule_check(url: str, body: str) -> Optional[Dict[str, Any]]:
-    """静态规则预筛查 — 正则匹配常见攻击模式，命中则直接拦截（零 LLM 延迟）"""
     fields_map = {'url': url, 'body': body}
     for rule in STATIC_RULES:
         for field_name in rule['fields']:
@@ -325,20 +299,17 @@ def static_rule_check(url: str, body: str) -> Optional[Dict[str, Any]]:
                 category = rule['category']
                 cat_info = ATTACK_CATEGORIES.get(category, ATTACK_CATEGORIES['unknown'])
                 return {
-                    'blocked': True,
-                    'direction': 'request',
-                    'category': category,
-                    'reason': rule['reason'],
+                    'blocked': True, 'direction': 'request',
+                    'category': category, 'reason': rule['reason'],
                     'severity': cat_info['severity'],
                     'severity_score': SEVERITY_SCORES[cat_info['severity']],
-                    'owasp': cat_info['owasp'],
-                    'mitre': cat_info['mitre'],
+                    'owasp': cat_info['owasp'], 'mitre': cat_info['mitre'],
                     'engine': 'static',
                 }
     return None
 
 
-# ==================== 静态预筛补充层 (层 2 关键词 / 层 3 敏感数据) ====================
+# ==================== 静态预筛补充层 ====================
 
 SUSPICIOUS_KEYWORDS = {
     'sql_injection':     ['union select', 'or 1=1', 'drop table', 'sleep(', 'benchmark(', "' or '", 'information_schema'],
@@ -362,7 +333,6 @@ SENSITIVE_PATTERNS = {
 
 
 def static_keyword_prefilter(url: str, body: str) -> Optional[Dict[str, Any]]:
-    """静态关键词预筛 —— 命中即判定，不进入 LLM/Agent。"""
     blob = f"{url or ''}\n{body or ''}".lower()
     for category, kws in SUSPICIOUS_KEYWORDS.items():
         for kw in kws:
@@ -380,7 +350,6 @@ def static_keyword_prefilter(url: str, body: str) -> Optional[Dict[str, Any]]:
 
 
 def static_sensitive_prefilter(body: str) -> Optional[Dict[str, Any]]:
-    """响应敏感数据静态预筛。"""
     if not body:
         return None
     for name, pat in SENSITIVE_PATTERNS.items():
@@ -401,66 +370,41 @@ def static_sensitive_prefilter(body: str) -> Optional[Dict[str, Any]]:
 # ==================== LLM 调用 ====================
 
 def call_llm(prompt: str) -> str:
-    """调用 LLM API (根据 format 配置选择对应的请求构造逻辑)"""
     base = config.base_url.rstrip("/")
     fmt = config.format or "openai"
-
     try:
         if fmt == "anthropic":
             url = base + "/v1/messages"
-            headers = {
-                "Content-Type": "application/json",
-                "anthropic-version": "2023-06-01",
-            }
+            headers = {"Content-Type": "application/json", "anthropic-version": "2023-06-01"}
             if config.api_key:
                 headers["x-api-key"] = config.api_key
-            resp = requests.post(
-                url,
-                headers=headers,
-                json={
-                    "model": config.model,
-                    "messages": [{"role": "user", "content": prompt}],
-                    "max_tokens": 600,
-                },
-                timeout=30,
-            )
+            resp = requests.post(url, headers=headers, json={
+                "model": config.model,
+                "messages": [{"role": "user", "content": prompt}],
+                "max_tokens": 600,
+            }, timeout=30)
             return resp.json()["content"][0]["text"].strip()
-
         elif fmt == "gemini":
             url = base + f"/v1beta/models/{config.model}:generateContent"
             headers = {"Content-Type": "application/json"}
             if config.api_key:
                 headers["x-goog-api-key"] = config.api_key
-            resp = requests.post(
-                url,
-                headers=headers,
-                json={
-                    "contents": [{"role": "user", "parts": [{"text": prompt}]}],
-                    "generationConfig": {"temperature": 0, "maxOutputTokens": 600},
-                },
-                timeout=30,
-            )
+            resp = requests.post(url, headers=headers, json={
+                "contents": [{"role": "user", "parts": [{"text": prompt}]}],
+                "generationConfig": {"temperature": 0, "maxOutputTokens": 600},
+            }, timeout=30)
             return resp.json()["candidates"][0]["content"]["parts"][0]["text"].strip()
-
         else:
-            # OpenAI 兼容格式 (默认)
             url = base + "/chat/completions"
             headers = {"Content-Type": "application/json"}
             if config.api_key:
                 headers["Authorization"] = f"Bearer {config.api_key}"
-            resp = requests.post(
-                url,
-                headers=headers,
-                json={
-                    "model": config.model,
-                    "messages": [{"role": "user", "content": prompt}],
-                    "temperature": 0,
-                    "max_tokens": 600,
-                },
-                timeout=30,
-            )
+            resp = requests.post(url, headers=headers, json={
+                "model": config.model,
+                "messages": [{"role": "user", "content": prompt}],
+                "temperature": 0, "max_tokens": 600,
+            }, timeout=30)
             return resp.json()["choices"][0]["message"]["content"].strip()
-
     except Exception as e:
         print(f"[WAF2] ⚠️ LLM 调用失败 (format={fmt}): {e}")
         stats['llm_errors'] += 1
@@ -470,10 +414,8 @@ def call_llm(prompt: str) -> str:
 # ==================== RAG 检索调度 ====================
 
 def _do_rag_retrieve(text: str):
-    """执行 RAG 检索, 返回 (context_str, used, top_score)。"""
     if not rag_engine or not config.rag_enabled:
         return format_retrieved_context([]), False, 0.0
-
     import time as _time
     _start = _time.perf_counter()
     try:
@@ -482,19 +424,16 @@ def _do_rag_retrieve(text: str):
         stats['rag_errors'] += 1
         print(f"[WAF2] ⚠️ RAG 检索失败: {_exc}", flush=True)
         return format_retrieved_context([]), False, 0.0
-
     elapsed = (_time.perf_counter() - _start) * 1000
     stats['rag_queries'] += 1
     stats['rag_total_latency_ms'] += elapsed
     if not results:
         stats['rag_empty_results'] += 1
-
     top_score = max((float(r.score) for r in results), default=0.0)
     return format_retrieved_context(results), bool(results), top_score
 
 
 def _build_request_rag_input(method: str, path: str, body: str) -> str:
-    """统一构造 RAG 检索输入: 以 payload 语义为主, path/method 为辅。"""
     method_s = (method or "GET").upper()
     path_s = (path or "")[:600]
     body_s = (body or "")[:800]
@@ -503,10 +442,9 @@ def _build_request_rag_input(method: str, path: str, body: str) -> str:
     return f"METHOD:{method_s}\nPATH:{path_s}"
 
 
-# ==================== Agent 解码工具 ====================
+# ==================== Agent 解码工具 (Lite 版仅这 4 个, 不含 rag_search) ====================
 
 def _tool_decode_base64(text: str) -> Dict[str, Any]:
-    """严格 Base64 解码：仅在 Agent 明确判断目标像 Base64 时才调用。"""
     if not text:
         return {'ok': False, 'reason': 'empty input'}
     s = text.strip().strip('"\'')
@@ -525,7 +463,6 @@ def _tool_decode_base64(text: str) -> Dict[str, Any]:
 
 
 def _tool_url_decode(text: str) -> Dict[str, Any]:
-    """URL 解码：仅在 Agent 观察到 %XX 或 + 编码且需要看清原始语义时调用。"""
     if not text:
         return {'ok': False, 'reason': 'empty input'}
     if '%' not in text and '+' not in text:
@@ -543,7 +480,6 @@ def _tool_url_decode(text: str) -> Dict[str, Any]:
 
 
 def _tool_decode_hex(text: str) -> Dict[str, Any]:
-    """Hex 解码：识别 `\\x41` / `0x41` / 纯 hex 串 等形态，Agent 需先判断再调用。"""
     if not text:
         return {'ok': False, 'reason': 'empty input'}
     s = text.strip()
@@ -568,7 +504,6 @@ def _tool_decode_hex(text: str) -> Dict[str, Any]:
 
 
 def _tool_decode_unicode(text: str) -> Dict[str, Any]:
-    """Unicode 转义解码：识别 `\\uXXXX` / `\\UXXXXXXXX` 形态绕过。"""
     if not text:
         return {'ok': False, 'reason': 'empty input'}
     if '\\u' not in text and '\\U' not in text:
@@ -591,27 +526,8 @@ def _tool_decode_unicode(text: str) -> Dict[str, Any]:
         return {'ok': False, 'reason': f'decode error: {e}'}
 
 
-def _tool_rag_search(text: str) -> Dict[str, Any]:
-    """RAG 工具: 对一段子串做相似攻击检索, 返回 top-k 摘要。
-
-    设计意图: Agent 在 base64/hex/unicode 解码出明文后, 可对解码后的子串做二次检索,
-    形成"解码 → 检索"的强证据链。直接对原始密文检索意义不大。
-    """
-    if not text or not isinstance(text, str):
-        return {'ok': False, 'reason': 'empty input'}
-    if rag_engine is None or not config.rag_enabled:
-        return {'ok': False, 'reason': 'RAG engine disabled'}
-    context_str, used, top_score = _do_rag_retrieve(text[:800])
-    if not used:
-        return {'ok': False, 'reason': 'no similar cases', 'top_score': round(top_score, 4)}
-    return {
-        'ok': True,
-        'top_score': round(top_score, 4),
-        'context': context_str[:1500],
-    }
-
-
-AGENT_TOOLS_BASE = {
+# Lite 版工具集: 仅 4 个解码工具, 不含 rag_search
+AGENT_TOOLS = {
     'decode_base64': {
         'desc': ('对一段可疑字符串做 Base64 解码。**前置判断**：必须在 Thought 中先说明'
                  '"这段像 Base64"的理由（长度 >= 16、仅含 A-Z a-z 0-9 +/= 字符等）再调用。'
@@ -637,19 +553,6 @@ AGENT_TOOLS_BASE = {
         'fn': lambda args: _tool_decode_unicode(args.get('text', '')),
     },
 }
-
-AGENT_TOOLS_FULL = dict(AGENT_TOOLS_BASE)
-AGENT_TOOLS_FULL['rag_search'] = {
-    'desc': ('对一段已观察到的可疑子串做相似攻击检索（RAG 知识库 top-k）。'
-             '**何时调用**：(1) 解码工具刚解出明文且长度 < 800 字符时, 用解码结果再检索一次; '
-             '(2) 头部预注入证据为"无相似案例"但你怀疑是变体/同源攻击时, 用最具体的子串再检索一次。'
-             '禁止: 用整段 body 或 url 盲目检索, 必须先定位可疑子串。'
-             'input: {"text": "<已定位子串>"}'),
-    'fn': lambda args: _tool_rag_search(args.get('text', '')),
-}
-
-# 完整版默认提供全套工具 (含 rag_search)
-AGENT_TOOLS = AGENT_TOOLS_FULL
 
 
 # ==================== Prompt 模板 ====================
@@ -720,8 +623,6 @@ KNOWN_SECRET_PREFIXES_TABLE = """### 已知凭据前缀参考表（用于 Agent 
 **判定规则**：出现上述前缀 + 后续长串（字母数字混合、熵较高）即构成强证据；若无明确前缀，看整体熵和上下文字段名（`token`/`secret`/`credential`/`password`/`api_key`/`key`）。
 """
 
-# ReAct Agent Prompt — 头部预注入 RAG 证据 + CoT 推理 + 解码工具 (+ rag_search 工具仅完整版)
-
 REACT_REQUEST_PROMPT = """你是 WAF2 的安全分析 Agent。前置的静态规则与关键词/敏感扫描已完成，未命中；
 你的任务是对**灰色样本**（可能存在混淆、编码、上下文语义攻击、**出站凭据泄露**）做**多步推理**判定。
 
@@ -733,6 +634,7 @@ REACT_REQUEST_PROMPT = """你是 WAF2 的安全分析 Agent。前置的静态规
 > - 如果检索到相似案例(非"无相似案例")，必须将其作为**首要决策依据**之一。
 > - 如果当前请求和参考案例形态一致(攻击类型/payload 模式相同)，必须按检索出的 category 输出 BLOCK，并在 evidence_ids 中引用对应案例 (如 ["kb#1"])。
 > - 你的内部"自身判断"应作为辅助；仅当检索结果为"无相似案例"或语义冲突时，才依赖自身知识做兜底判断。
+> - 注意: Lite 版的 RAG 证据已在此处一次性给出, 你之后不能再次发起 RAG 检索, 因此对当前证据要充分利用。
 
 {taxonomy}
 
@@ -763,7 +665,7 @@ Action:
 0. **Evidence Matching**: 先看上方"历史攻击证据"。逐条比对当前请求与每条证据，找到形态最相似的 1-2 条；记下其 [类别] 和编号。
 1. **Definition Matching**：当前请求是否匹配某类攻击的定义？
 2. **Indicator Matching**：是否命中该类别的风险指标（至少 1 条）？
-3. **Obfuscation Check**：若表层看似正常但存在可疑编码（长 Base64、%XX 串、`\\xHH`、`\\uXXXX`），才触发解码工具；解码后若文本可疑可再用 rag_search 二次检索（如可用）。
+3. **Obfuscation Check**：若表层看似正常但存在可疑编码（长 Base64、%XX 串、`\\xHH`、`\\uXXXX`），才触发解码工具。
 4. **Action**：(a) RAG 证据明显同类 → BLOCK 并填 evidence_ids；(b) 自身识别证据充分 → BLOCK；(c) 都无确证 → PASS。
 
 ### 少样本示例
@@ -776,7 +678,7 @@ Action:
 {{"action":"final_answer","action_input":{{"verdict":"PASS","evidence_ids":[]}}}}
 ```
 
-#### Example 2（Base64 混淆的命令注入 + 解码后二次检索 — 仅完整版工具集时演示）
+#### Example 2（Base64 混淆的命令注入）
 Input: method=POST, path=/run, body={{"cmd":"YmFzaCAtYyAnY2F0IC9ldGMvcGFzc3dkJw=="}}
 Thought: cmd 字段 "YmFz..." 长度 36、仅含 base64 字母表，疑似 Base64，先解码确认。
 Action:
@@ -923,9 +825,6 @@ _SALVAGE_CAT_RE = re.compile(
 
 
 def _parse_agent_action(text: str) -> Optional[Dict[str, Any]]:
-    """解析 Agent 单步输出。先尝试提取代码块内 JSON, 失败时尝试整段抽取首个 {...},
-    再失败时按 BLOCK 关键词抢救出拦截判决 (避免 LLM 输出格式不严格而漏拦)。
-    """
     m = _ACTION_RE.search(text or '')
     raw = m.group(1).strip() if m else (text or '').strip()
     if not m:
@@ -939,7 +838,6 @@ def _parse_agent_action(text: str) -> Optional[Dict[str, Any]]:
             return obj
     except Exception:
         pass
-
     if _SALVAGE_BLOCK_RE.search(text or ''):
         cat_m = _SALVAGE_CAT_RE.search(text or '')
         category = cat_m.group(1).lower() if cat_m else 'unknown'
@@ -959,7 +857,6 @@ def _parse_agent_action(text: str) -> Optional[Dict[str, Any]]:
 
 
 def run_react_agent(prompt: str, max_iters: int = 4) -> Optional[Dict[str, Any]]:
-    """运行 ReAct 循环, 返回 final_answer 的 action_input。失败返回 None。"""
     stats['agent_invocations'] += 1
     scratchpad = ''
     for step in range(max_iters):
@@ -977,10 +874,8 @@ def run_react_agent(prompt: str, max_iters: int = 4) -> Optional[Dict[str, Any]]
         if not isinstance(args, dict):
             args = {'text': str(args)}
         print(f"[WAF2][Agent] step={step} action={name} args_keys={list(args.keys())}")
-
         if name == 'final_answer':
             return args
-
         stats['agent_tool_calls'][name] += 1
         tool = AGENT_TOOLS.get(name)
         if not tool:
@@ -991,9 +886,7 @@ def run_react_agent(prompt: str, max_iters: int = 4) -> Optional[Dict[str, Any]]
                 observation = json.dumps(result, ensure_ascii=False)[:800]
             except Exception as e:
                 observation = f'Tool error: {e}'
-
         scratchpad += f"\nThought: (reasoning)\nAction:\n```\n{json.dumps(action, ensure_ascii=False)}\n```\nObservation: {observation}\n"
-
     print('[WAF2][Agent] 达到最大迭代未得到 final_answer')
     return None
 
@@ -1003,7 +896,6 @@ def _tools_doc() -> str:
 
 
 def _verdict_to_result(final: Dict[str, Any], direction: str) -> Optional[Dict[str, Any]]:
-    """把 Agent final_answer 的 dict 转换成 detection result。"""
     verdict = str(final.get('verdict', '')).upper()
     evidence_ids = final.get('evidence_ids', [])
     if not isinstance(evidence_ids, list):
@@ -1016,16 +908,12 @@ def _verdict_to_result(final: Dict[str, Any], direction: str) -> Optional[Dict[s
         reason = str(final.get('reason', '检测到攻击')).strip()
         cat_info = ATTACK_CATEGORIES.get(category, ATTACK_CATEGORIES['unknown'])
         return {
-            'blocked': True,
-            'direction': direction,
-            'category': category,
-            'reason': reason,
+            'blocked': True, 'direction': direction,
+            'category': category, 'reason': reason,
             'severity': cat_info['severity'],
             'severity_score': SEVERITY_SCORES[cat_info['severity']],
-            'owasp': cat_info['owasp'],
-            'mitre': cat_info['mitre'],
-            'engine': 'agent',
-            'evidence_ids': evidence_ids,
+            'owasp': cat_info['owasp'], 'mitre': cat_info['mitre'],
+            'engine': 'agent', 'evidence_ids': evidence_ids,
         }
     return None
 
@@ -1036,8 +924,7 @@ def agent_analyze_request(method: str, path: str, body: str, retrieved_context: 
         taxonomy=ATTACK_TAXONOMY,
         secrets_table=KNOWN_SECRET_PREFIXES_TABLE,
         tools=_tools_doc(),
-        method=method,
-        path=path,
+        method=method, path=path,
         body=(body[:500] if body else '(空)'),
     )
     final = run_react_agent(prompt, max_iters=config.agent_max_iters_request)
@@ -1052,8 +939,7 @@ def agent_analyze_response(status_code: int, body: str, retrieved_context: str) 
         taxonomy=ATTACK_TAXONOMY,
         secrets_table=KNOWN_SECRET_PREFIXES_TABLE,
         tools=_tools_doc(),
-        status_code=status_code,
-        body=body[:1000],
+        status_code=status_code, body=body[:1000],
     )
     final = run_react_agent(prompt, max_iters=config.agent_max_iters_response)
     if not final:
@@ -1061,14 +947,13 @@ def agent_analyze_response(status_code: int, body: str, retrieved_context: str) 
     return _verdict_to_result(final, 'response')
 
 
-# ==================== 调度入口 (analyze_*) ====================
+# ==================== 调度入口 ====================
 
 def analyze_request(method: str, path: str, body: str) -> Dict[str, Any]:
-    """分析请求 (静态关键词 → RAG 检索 → ReAct Agent, 全程缓存)"""
     if not config.request_analysis:
         return {'blocked': False, 'direction': 'request'}
 
-    cache_dims = f"rag={int(config.rag_enabled)}|scope={config.rag_scope}|model={config.model}|fmt={config.format}|tools=full"
+    cache_dims = f"rag={int(config.rag_enabled)}|scope={config.rag_scope}|model={config.model}|fmt={config.format}|tools=lite"
     cache_key = f"req:{cache_dims}:{method}:{path}:{body[:200]}"
 
     if config.cache_enabled:
@@ -1077,7 +962,6 @@ def analyze_request(method: str, path: str, body: str) -> Dict[str, Any]:
             stats['cache_hits'] += 1
             return cached
 
-    # 层 2: 静态关键词
     kw_hit = static_keyword_prefilter(path, body)
     if kw_hit:
         if config.cache_enabled:
@@ -1085,7 +969,6 @@ def analyze_request(method: str, path: str, body: str) -> Dict[str, Any]:
         print(f"[WAF2] 请求分析(static_keyword): BLOCK [{kw_hit.get('category')}] {kw_hit.get('reason')}")
         return kw_hit
 
-    # 层 3a: RAG 检索 (头部预注入用)
     rag_input = _build_request_rag_input(method, path, body)
     retrieved_context, rag_used_raw, top_score = _do_rag_retrieve(rag_input)
     rag_gated = False
@@ -1095,7 +978,6 @@ def analyze_request(method: str, path: str, body: str) -> Dict[str, Any]:
         retrieved_context = format_retrieved_context([])
     rag_used = rag_used_raw and not rag_gated
 
-    # 层 3b: ReAct Agent
     stats['llm_calls'] += 1
     agent_result = agent_analyze_request(method, path, body, retrieved_context)
     if agent_result is not None:
@@ -1105,7 +987,7 @@ def analyze_request(method: str, path: str, body: str) -> Dict[str, Any]:
         if config.cache_enabled:
             llm_cache.set(cache_key, agent_result)
         verdict_str = 'BLOCK' if agent_result.get('blocked') else 'PASS'
-        print(f"[WAF2] 请求分析(Agent+RAG): {verdict_str} (rag_used={rag_used}, top_score={top_score:.3f})")
+        print(f"[WAF2] 请求分析(Agent+RAG·Lite): {verdict_str} (rag_used={rag_used}, top_score={top_score:.3f})")
         return agent_result
 
     print("[WAF2] ⚠️ Agent 请求分析失败，放行")
@@ -1120,17 +1002,14 @@ def analyze_request(method: str, path: str, body: str) -> Dict[str, Any]:
 
 
 def analyze_response(status_code: int, body: str) -> Dict[str, Any]:
-    """分析响应 (敏感正则 → RAG (仅 scope=all) → ReAct Agent)"""
     if not config.response_analysis:
         return {'blocked': False, 'direction': 'response'}
-
     if status_code >= 400:
         return {'blocked': False, 'direction': 'response'}
-
     if len(body) < 50:
         return {'blocked': False, 'direction': 'response'}
 
-    cache_dims = f"rag={int(config.rag_enabled)}|scope={config.rag_scope}|model={config.model}|fmt={config.format}|tools=full"
+    cache_dims = f"rag={int(config.rag_enabled)}|scope={config.rag_scope}|model={config.model}|fmt={config.format}|tools=lite"
     cache_key = f"resp:{cache_dims}:{status_code}:{body[:200]}"
 
     if config.cache_enabled:
@@ -1139,7 +1018,6 @@ def analyze_response(status_code: int, body: str) -> Dict[str, Any]:
             stats['cache_hits'] += 1
             return cached
 
-    # 层 1: 静态敏感数据正则
     sens_hit = static_sensitive_prefilter(body)
     if sens_hit:
         if config.cache_enabled:
@@ -1147,13 +1025,11 @@ def analyze_response(status_code: int, body: str) -> Dict[str, Any]:
         print(f"[WAF2] 响应分析(static_sensitive): BLOCK {sens_hit.get('reason')}")
         return sens_hit
 
-    # 层 2a: RAG 检索 (仅 scope=all)
     if config.rag_scope == "all":
         retrieved_context, rag_used, top_score = _do_rag_retrieve(body[:500])
     else:
         retrieved_context, rag_used, top_score = format_retrieved_context([]), False, 0.0
 
-    # 层 2b: ReAct Agent
     stats['llm_calls'] += 1
     agent_result = agent_analyze_response(status_code, body, retrieved_context)
     if agent_result is not None:
@@ -1162,7 +1038,7 @@ def analyze_response(status_code: int, body: str) -> Dict[str, Any]:
         if config.cache_enabled:
             llm_cache.set(cache_key, agent_result)
         verdict_str = 'BLOCK' if agent_result.get('blocked') else 'PASS'
-        print(f"[WAF2] 响应分析(Agent+RAG): {verdict_str}")
+        print(f"[WAF2] 响应分析(Agent+RAG·Lite): {verdict_str}")
         return agent_result
 
     print("[WAF2] ⚠️ Agent 响应分析失败，放行")
@@ -1174,12 +1050,11 @@ def analyze_response(status_code: int, body: str) -> Dict[str, Any]:
 
 def parse_llm_result(result: str, direction: str) -> Dict[str, Any]:
     """旧版 LLM 单步 JSON / "BLOCK|cat|reason" 输出解析。当前流程 Agent 路径主用 _parse_agent_action;
-    此函数保留作为非 Agent 路径或外部调用兼容入口。
+    此函数保留作为非 Agent 路径或外部调用兼容入口, 与完整版保持 API 对称。
     """
     raw = (result or "").strip()
     if not raw:
         return {'blocked': False, 'direction': direction}
-
     upper = raw.upper()
     if upper.startswith("ERROR"):
         return {'blocked': False, 'direction': direction, 'llm_error': True}
@@ -1227,18 +1102,15 @@ def parse_llm_result(result: str, direction: str) -> Dict[str, Any]:
     cleaned = upper.lstrip("- *•·` \"'>\n\t")
     if cleaned.startswith("PASS"):
         return {'blocked': False, 'direction': direction}
-
     block_start = None
     if cleaned.startswith("BLOCK"):
         block_start = cleaned
     elif "BLOCK|" in upper:
         idx = upper.index("BLOCK|")
         block_start = upper[idx:]
-
     if block_start is None:
         stats['llm_parse_failed'] += 1
         return {'blocked': False, 'direction': direction, 'llm_parse_failed': True}
-
     parts = block_start.split("|")
     category = parts[1].lower().strip() if len(parts) > 1 else 'unknown'
     category = category.split()[0] if category else 'unknown'
@@ -1266,7 +1138,7 @@ def log_detection(data: Dict):
         pass
 
 
-# ==================== API 端点 (必须在代理路由之前注册) ====================
+# ==================== API 端点 ====================
 
 def _config_snapshot() -> Dict[str, Any]:
     kb_size = rag_engine.knowledge_base.info().total_entries if rag_engine else 0
@@ -1291,7 +1163,7 @@ def _config_snapshot() -> Dict[str, Any]:
         'agent_max_iters_response': config.agent_max_iters_response,
         'knowledge_base_size': kb_size,
         'agent_tools': list(AGENT_TOOLS.keys()),
-        'edition': 'full',
+        'edition': 'lite',
     }
 
 
@@ -1350,7 +1222,6 @@ async def update_config(update: ConfigUpdate):
 
 @app.get("/waf2/rag/info")
 async def get_rag_info():
-    """获取 RAG 知识库元信息"""
     if rag_engine is None:
         return {
             'enabled': False, 'total_entries': 0, 'by_category': {},
@@ -1368,19 +1239,15 @@ async def get_rag_info():
 
 @app.post("/waf2/test-llm")
 async def test_llm(req: Request):
-    """测试 LLM API Key 连通性"""
     body = await req.json()
     api_key = body.get("api_key", "")
     base_url = body.get("base_url", "").rstrip("/")
     model = body.get("model", "")
     fmt = body.get("format", "openai")
-
     if not base_url or not model:
         return {"success": False, "error": "缺少 base_url 或 model"}
-
     import time
     start = time.time()
-
     try:
         if fmt == "anthropic":
             url = base_url + "/v1/messages"
@@ -1411,9 +1278,7 @@ async def test_llm(req: Request):
                 "messages": [{"role": "user", "content": "hi"}],
                 "temperature": 0, "max_tokens": 5,
             }, timeout=15)
-
         latency_ms = int((time.time() - start) * 1000)
-
         if resp.status_code == 200:
             return {"success": True, "message": "连接成功", "latency_ms": latency_ms}
         else:
@@ -1469,9 +1334,8 @@ async def get_dashboard():
     block_rate = (stats['blocked'] / max(stats['total'], 1)) * 100
     rag_avg = stats['rag_total_latency_ms'] / max(stats['rag_queries'], 1)
     kb_size = rag_engine.knowledge_base.info().total_entries if rag_engine else 0
-
     return {
-        'edition': 'full',
+        'edition': 'lite',
         'summary': {
             'total': stats['total'],
             'passed': stats['passed'],
@@ -1549,7 +1413,7 @@ async def reset_stats():
 async def health_check():
     return {
         'status': 'healthy',
-        'edition': 'full',
+        'edition': 'lite',
         'enabled': config.enabled,
         'upstream': config.upstream,
         'model': config.model,
@@ -1563,17 +1427,13 @@ async def health_check():
 # ==================== 代理路由 ====================
 
 def _apply_eval_fail_closed(result: Dict[str, Any], direction: str, hint: str) -> Dict[str, Any]:
-    """评估模式严格策略: 当 LLM 失败 / INCONCLUSIVE 时按 fail-closed 拦截。"""
     if not (config.eval_mode and config.eval_fail_closed):
         return result
     if result.get('llm_error') or result.get('inconclusive'):
         return {
-            'blocked': True,
-            'direction': direction,
-            'category': 'unknown',
-            'reason': f'评估模式严格策略: {hint}',
-            'severity': 'medium',
-            'severity_score': SEVERITY_SCORES['medium'],
+            'blocked': True, 'direction': direction,
+            'category': 'unknown', 'reason': f'评估模式严格策略: {hint}',
+            'severity': 'medium', 'severity_score': SEVERITY_SCORES['medium'],
             'owasp': 'N/A', 'mitre': 'N/A',
             **{k: v for k, v in result.items() if k.startswith('rag_') or k in ('llm_error', 'inconclusive')},
         }
@@ -1582,9 +1442,7 @@ def _apply_eval_fail_closed(result: Dict[str, Any], direction: str, hint: str) -
 
 @app.api_route("/{path:path}", methods=["GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS"])
 async def proxy(path: str, request: Request):
-    """主代理入口 - 转发所有非 waf2 API 的请求到上游"""
     start_time = datetime.now()
-
     if request.method == "OPTIONS":
         return Response(status_code=200)
 
@@ -1596,7 +1454,6 @@ async def proxy(path: str, request: Request):
     if body:
         print(f"[WAF2] Body: {body[:100]}...")
 
-    # ========== 检查 WAF2 是否启用 ==========
     if not config.enabled:
         print(f"[WAF2] ⏸️ WAF2 已禁用，直接转发")
         try:
@@ -1612,10 +1469,8 @@ async def proxy(path: str, request: Request):
                             content={"error": f"Header '{k}' contains non-ASCII characters, which is not allowed by HTTP protocol"}
                         )
                 upstream_resp = await client.request(
-                    request.method,
-                    f"{config.upstream}/{path}",
-                    content=body.encode() if body else None,
-                    headers=headers,
+                    request.method, f"{config.upstream}/{path}",
+                    content=body.encode() if body else None, headers=headers,
                 )
             stats['passed'] += 1
             return Response(
@@ -1626,11 +1481,10 @@ async def proxy(path: str, request: Request):
         except Exception as e:
             return Response(content=f"上游服务错误: {e}", status_code=502)
 
-    # ========== 构造完整 URL ==========
     query_string = str(request.url.query) if request.url.query else ""
     full_url = f"/{path}?{query_string}" if query_string else f"/{path}"
 
-    # ========== 阶段0: 静态规则正则预筛查 ==========
+    # 阶段0: 静态正则
     static_result = static_rule_check(full_url, body)
     if static_result:
         stats['blocked'] += 1
@@ -1646,19 +1500,17 @@ async def proxy(path: str, request: Request):
         print(f"[WAF2] ══════════════════════════════════════ ({elapsed:.0f}ms)")
         return Response(
             content=json.dumps({
-                'error': 'WAF2 拦截',
-                'direction': 'request',
+                'error': 'WAF2 拦截', 'direction': 'request',
                 'category': static_result.get('category'),
                 'severity': static_result.get('severity'),
                 'reason': static_result.get('reason'),
-                'owasp': static_result.get('owasp'),
-                'mitre': static_result.get('mitre'),
+                'owasp': static_result.get('owasp'), 'mitre': static_result.get('mitre'),
                 'engine': 'static',
             }, ensure_ascii=False),
             status_code=403, media_type="application/json",
         )
 
-    # ========== 阶段1: 关键词层 + RAG 检索 + ReAct Agent ==========
+    # 阶段1: 关键词层 + RAG 头部预注入 + Agent
     req_result = analyze_request(request.method, full_url, body)
     req_result = _apply_eval_fail_closed(req_result, 'request', 'LLM 调用失败/不可解析，按 fail-closed 拦截')
 
@@ -1679,13 +1531,11 @@ async def proxy(path: str, request: Request):
         print(f"[WAF2] ══════════════════════════════════════ ({elapsed:.0f}ms)")
         return Response(
             content=json.dumps({
-                'error': 'WAF2 拦截',
-                'direction': 'request',
+                'error': 'WAF2 拦截', 'direction': 'request',
                 'category': req_result.get('category'),
                 'severity': req_result.get('severity'),
                 'reason': req_result.get('reason'),
-                'owasp': req_result.get('owasp'),
-                'mitre': req_result.get('mitre'),
+                'owasp': req_result.get('owasp'), 'mitre': req_result.get('mitre'),
                 'engine': req_result.get('engine', 'agent'),
                 'rag_augmented': bool(req_result.get('rag_augmented')),
                 'rag_top_score': req_result.get('rag_top_score', 0.0),
@@ -1694,7 +1544,7 @@ async def proxy(path: str, request: Request):
             status_code=403, media_type="application/json",
         )
 
-    # ========== 阶段2: 转发请求 ==========
+    # 阶段2: 转发上游
     if config.eval_mode:
         stats['passed'] += 1
         elapsed = (datetime.now() - start_time).total_seconds() * 1000
@@ -1705,7 +1555,7 @@ async def proxy(path: str, request: Request):
         return JSONResponse(
             status_code=200,
             content={
-                "ok": True, "eval_mode": True, "edition": "full",
+                "ok": True, "eval_mode": True, "edition": "lite",
                 "path": f"/{path}", "method": request.method,
                 "message": "mock upstream response",
             },
@@ -1724,10 +1574,8 @@ async def proxy(path: str, request: Request):
                         content={"error": f"Header '{k}' contains non-ASCII characters, which is not allowed by HTTP protocol"}
                     )
             upstream_resp = await client.request(
-                request.method,
-                f"{config.upstream}/{path}",
-                content=body.encode() if body else None,
-                headers=headers,
+                request.method, f"{config.upstream}/{path}",
+                content=body.encode() if body else None, headers=headers,
             )
             resp_body = upstream_resp.text
             resp_status = upstream_resp.status_code
@@ -1735,7 +1583,7 @@ async def proxy(path: str, request: Request):
         print(f"[WAF2] 上游错误: {e}")
         return Response(content=f"上游服务错误: {e}", status_code=502)
 
-    # ========== 阶段3: 响应检测 ==========
+    # 阶段3: 响应检测
     resp_result = analyze_response(resp_status, resp_body)
     resp_result = _apply_eval_fail_closed(resp_result, 'response', '响应分析失败，按 fail-closed 拦截')
 
@@ -1754,8 +1602,7 @@ async def proxy(path: str, request: Request):
         print(f"[WAF2] ══════════════════════════════════════ ({elapsed:.0f}ms)")
         return Response(
             content=json.dumps({
-                'error': 'WAF2 拦截',
-                'direction': 'response',
+                'error': 'WAF2 拦截', 'direction': 'response',
                 'category': resp_result.get('category'),
                 'severity': resp_result.get('severity'),
                 'reason': resp_result.get('reason'),
@@ -1767,7 +1614,7 @@ async def proxy(path: str, request: Request):
             status_code=403, media_type="application/json",
         )
 
-    # ========== 阶段4: 返回响应 ==========
+    # 阶段4: 返回响应
     stats['passed'] += 1
     elapsed = (datetime.now() - start_time).total_seconds() * 1000
     stats['total_latency_ms'] += elapsed
@@ -1788,7 +1635,7 @@ async def proxy(path: str, request: Request):
 if __name__ == "__main__":
     import uvicorn
     print("=" * 60)
-    print("  WAF2 - MCP Guardrails 动态防火墙 (RAG+CoT 融合 · 完整版)")
+    print("  WAF2 - MCP Guardrails 动态防火墙 (RAG+CoT 融合 · 轻量版/Lite)")
     print("=" * 60)
     print(f"  监听端口: 8081")
     print(f"  上游地址: {config.upstream}")
@@ -1796,10 +1643,9 @@ if __name__ == "__main__":
     print(f"  API Key:  {'已配置' if config.api_key else '未配置'}")
     print(f"  RAG:      enabled={config.rag_enabled}, scope={config.rag_scope}, "
           f"top_k={config.rag_top_k}, threshold={config.rag_threshold}")
-    print(f"  Agent:    tools={list(AGENT_TOOLS.keys())}, "
+    print(f"  Agent:    tools={list(AGENT_TOOLS.keys())} (lite, no rag_search), "
           f"max_iters={config.agent_max_iters_request}/{config.agent_max_iters_response}")
     print(f"  Eval:     mode={config.eval_mode}, fail_closed={config.eval_fail_closed}")
-    print(f"  Pipeline: STATIC_RULES → KEYWORDS → RAG → ReAct Agent (request) ;"
-          f" SENSITIVE → RAG(scope=all) → Agent (response)")
+    print(f"  Pipeline: STATIC_RULES → KEYWORDS → RAG(头部预注入) → ReAct Agent (request)")
     print("=" * 60)
     uvicorn.run(app, host="0.0.0.0", port=8081)
