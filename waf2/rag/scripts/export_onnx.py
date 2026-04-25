@@ -19,6 +19,9 @@ import json
 import shutil
 import sys
 from pathlib import Path
+import os
+# 指定国内镜像地址
+os.environ["HF_ENDPOINT"] = "https://hf-mirror.com"
 
 HERE = Path(__file__).resolve()
 PROJECT_ROOT = HERE.parents[3]
