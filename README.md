@@ -162,6 +162,63 @@ WordPress + WooCommerce 电商网店，提供 **两类 MCP Server** 供 AI Agent
 
 配置入口见 [config/mcp-servers.json](https://github.com/lingqing777/mcp-guardrails/blob/master/config/mcp-servers.json)，演示说明见 [demo/supabase-lethal-trifecta.md](https://github.com/lingqing777/mcp-guardrails/blob/master/demo/supabase-lethal-trifecta.md)。
 
+## RAG 知识增强 (WAF2)
+
+WAF2 在 LLM 判断前增加一层向量检索，从 3354 条攻击知识库中找出最相似的已知攻击案例注入 prompt。
+
+### 一键启动即可用
+
+`./start.sh` 或 `start.bat` 会自动构建带 RAG 的 WAF2 镜像。镜像内置：
+
+- ONNX embedding 模型 (`all-MiniLM-L6-v2`, 86MB)
+- ChromaDB 向量索引 (3354 条, 15MB)
+- 数据来源: PayloadsAllTheThings + OWASP CRS + AI/MCP 攻击专项种子集
+
+### 验证 RAG 可用
+
+启动完成后:
+
+```bash
+# 1. 看启动日志, 应该有 "RAG 知识库" 行
+docker logs waf2 | grep "RAG 知识库"
+# 期望: [WAF2] RAG 知识库: version=0.1.0, entries=3354, ...
+
+# 2. 调 RAG 元信息端点
+curl http://localhost:8081/waf2/rag/info
+# 期望: { "enabled": true, "total_entries": 3354, ... }
+
+# 3. Dashboard 进 WAF2 Tab, 看 "RAG 知识增强" 卡片
+```
+
+### 关闭 RAG
+
+```bash
+# 临时关 (重启失效)
+curl -X POST http://localhost:8081/waf2/config -H "Content-Type: application/json" -d '{"rag_enabled":false}'
+
+# 永久关 (.env 设置)
+RAG_ENABLED=false
+```
+
+### 重建知识库 (开发者)
+
+```bash
+# 拉原始数据
+cd waf2/rag/data/raw
+git clone --depth 1 https://github.com/swisskyrepo/PayloadsAllTheThings payloadsallthethings
+git clone --depth 1 https://github.com/coreruleset/coreruleset owasp-crs
+
+# 装开发依赖 + 重建
+cd ../../../..
+python3 -m venv waf2/rag/.venv
+waf2/rag/.venv/bin/pip install onnxruntime chromadb tokenizers numpy
+waf2/rag/.venv/bin/pip install "optimum[onnxruntime]" sentence-transformers transformers
+waf2/rag/.venv/bin/python -m waf2.rag.scripts.export_onnx
+waf2/rag/.venv/bin/python -m waf2.rag.scripts.build_kb --phase all
+
+# 重建后 commit + push, 再 docker-compose up -d --build
+```
+
 ## 许可证
 
 MIT License

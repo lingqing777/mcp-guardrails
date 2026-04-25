@@ -60,7 +60,10 @@ def _build_processors() -> list:
         PayloadsAllTheThingsProcessor(RAW_DIR / "payloadsallthethings"),
         OwaspCrsProcessor(RAW_DIR / "owasp-crs"),
         PromptInjectionProcessor(RAW_DIR / "prompt-injection"),
-        SemanticEvalProcessor(RAG_DIR / "eval" / "semantic_only.jsonl"),
+        # ⚠️ 已禁用 SemanticEvalProcessor: 它会把评估集 (eval/semantic_only.jsonl)
+        # 注入到 KB, 而 eval_rag.py 评估时也读同一个文件 → 数据泄漏, F1 虚高。
+        # 如需把语义攻击样本入 KB, 请用独立的种子文件 (不能复用评估集)。
+        # SemanticEvalProcessor(RAG_DIR / "eval" / "semantic_only.jsonl"),
     ]
 
 

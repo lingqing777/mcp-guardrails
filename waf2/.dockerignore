@@ -1,3 +1,4 @@
+# 通用排除
 *.bat
 .env
 .env.example
@@ -5,3 +6,18 @@
 mcp-hub/
 node_modules/
 *.log
+
+# RAG 原始数据源 (体积大且镜像不需要)
+rag/data/raw/
+
+# RAG 评估数据 (镜像运行时不需要, 也避免污染)
+rag/data/eval/
+
+# Python 虚拟环境与缓存 (开发用)
+rag/.venv/
+**/__pycache__/
+**/*.pyc
+
+# RAG 开发脚本 (镜像运行时不需要 build_kb / export_onnx)
+# 容器只需要 rag/*.py + rag/data/{model,chroma_db,manifest.json}
+rag/scripts/

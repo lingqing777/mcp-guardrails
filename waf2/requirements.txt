@@ -2,3 +2,9 @@ fastapi
 uvicorn
 httpx
 requests
+
+# RAG 运行时依赖 (容器内推理, 不需要 PyTorch/sentence-transformers)
+onnxruntime
+chromadb
+tokenizers
+numpy

@@ -47,3 +47,22 @@ coverage/
 
 # Docker
 docker-compose.override.yml
+
+# ==================== WAF2 RAG 数据资产策略 ====================
+# 入仓库 (跨平台二进制 + 关键产物, 总计 ~103M):
+#   waf2/rag/data/model/                 ONNX 模型
+#   waf2/rag/data/chroma_db/              ChromaDB 持久化索引
+#   waf2/rag/data/manifest.json          版本元信息
+#   waf2/rag/data/processed/payloads.jsonl  清洗后的结构化记录
+#
+# 不入仓库 (开发者本地重建知识库时再 git clone 拉取):
+# 27M 外部仓库克隆 (PayloadsAllTheThings, OWASP-CRS)
+waf2/rag/data/raw/
+
+# 评估集 / 临时产物 (避免污染 KB)
+waf2/rag/data/eval/
+waf2/rag/data/processed/*.tmp.jsonl
+
+# Python 虚拟环境与缓存
+waf2/rag/.venv/
+waf2/rag/**/__pycache__/
