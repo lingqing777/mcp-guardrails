@@ -48,7 +48,7 @@
 ./start.sh
 
 # Windows
-start.bat
+.\start.bat
 ```
 
 ### 配置（全部在 Dashboard 完成）
