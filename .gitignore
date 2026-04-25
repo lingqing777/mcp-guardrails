@@ -63,6 +63,12 @@ waf2/rag/data/raw/
 waf2/rag/data/eval/
 waf2/rag/data/processed/*.tmp.jsonl
 
+# CSIC 2010 数据集 (29M, 评委从 Kaggle 自下: 见 eval-report.md)
+waf2/rag/eval/csic2010/
+
+# eval_rag.py 每次跑会刷新, 不入仓库
+waf2/rag/eval/results.md
+
 # Python 虚拟环境与缓存
 waf2/rag/.venv/
 waf2/rag/**/__pycache__/
