@@ -16,12 +16,14 @@
 - 保证 `docker-compose up -d --build` 后，WAF2 容器内具备可用 RAG 环境
 - 在启动与文档中明确“一键启动默认具备 RAG 能力”
 - 明确哪些内容属于镜像资产，哪些属于本地开发产物（避免仓库污染）
+- 当前主线已合入 ReAct/COT 版 WAF2 代理，本 change 同步要求镜像交付时保留 RAG evidence 注入 ReAct prompt 的能力
 
 ## Capability Scope
 
 ### Modified Capabilities
 
 - `waf2`: 交付形态从“仅代理脚本”升级为“代理 + RAG 可运行资产”
+- `waf2`: 交付形态进一步兼容 ReAct/COT 管线，RAG evidence 可进入 Agent 推理
 - `docker`: WAF2 构建流程支持可复现 RAG 运行环境
 
 ## Impact
