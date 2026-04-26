@@ -84,7 +84,7 @@ class WAF2Config:
         self.rag_scope = os.environ.get("RAG_SCOPE", "request").lower()
         self.rag_top_k = int(os.environ.get("RAG_TOP_K", "5"))
         self.rag_threshold = float(os.environ.get("RAG_THRESHOLD", "0.60"))
-        self.rag_confidence_threshold = float(os.environ.get("RAG_CONFIDENCE_THRESHOLD", "0.70"))
+        self.rag_confidence_threshold = float(os.environ.get("RAG_CONFIDENCE_THRESHOLD", "0.50"))
         self.agent_max_iters_request = int(os.environ.get("AGENT_MAX_ITERS_REQUEST", "4"))
         self.agent_max_iters_response = int(os.environ.get("AGENT_MAX_ITERS_RESPONSE", "3"))
 
