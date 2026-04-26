@@ -4,6 +4,43 @@
 
 import { formatLabel, formatTime, escapeHtml } from '../utils/formatters.js';
 
+function formatScore(value) {
+    const number = Number(value);
+    return Number.isFinite(number) ? number.toFixed(3) : '';
+}
+
+function renderWaf2DecisionTags(detection) {
+    const tags = [];
+    const engine = detection.engine || detection.labels?.engine;
+    const route = detection.route || detection.labels?.route;
+    const ragAugmented = detection.rag_augmented === true;
+    const ragGated = detection.rag_gated === true;
+    const ragScore = formatScore(detection.rag_top_score);
+    const evidenceIds = Array.isArray(detection.evidence_ids) ? detection.evidence_ids : [];
+    const routeReasons = Array.isArray(detection.route_reasons) ? detection.route_reasons : [];
+
+    if (engine) {
+        tags.push(`<span class="tag engine">Engine: ${escapeHtml(formatLabel(engine))}</span>`);
+    }
+    if (route) {
+        tags.push(`<span class="tag route">Route: ${escapeHtml(formatLabel(route))}</span>`);
+    }
+    if (ragAugmented) {
+        tags.push(`<span class="tag rag">RAG: hit${ragScore ? ` ${ragScore}` : ''}</span>`);
+    } else if (ragGated) {
+        tags.push(`<span class="tag rag-muted">RAG: gated${ragScore ? ` ${ragScore}` : ''}</span>`);
+    }
+    if (evidenceIds.length > 0) {
+        tags.push(`<span class="tag evidence">Evidence: ${escapeHtml(evidenceIds.slice(0, 3).join(', '))}</span>`);
+    }
+    if (routeReasons.length > 0) {
+        const reasonText = routeReasons.slice(0, 3).join(', ');
+        tags.push(`<span class="tag route-reason">Why: ${escapeHtml(reasonText)}</span>`);
+    }
+
+    return tags.join('');
+}
+
 /**
  * 渲染单个检测记录
  * @param {Object} detection - 检测记录数据
@@ -20,14 +57,16 @@ export function renderDetectionItem(detection, source = 'all') {
     const mitre = detection.mitre || labels.mitreTactic || '-';
     const direction = detection.direction || labels.direction || '-';
     const itemSource = detection.source || labels.source || source;
+    const normalizedSource = String(itemSource || source).toLowerCase();
     const tool = detection.tool || '-';
+    const waf2DecisionTags = normalizedSource === 'waf2' ? renderWaf2DecisionTags(detection) : '';
 
     return `
         <div class="detection-item ${severity}">
             <div class="detection-header">
                 <span class="detection-category">
                     ${escapeHtml(formatLabel(category))}
-                    <span class="waf-badge ${itemSource}">${itemSource.toUpperCase()}</span>
+                    <span class="waf-badge ${escapeHtml(normalizedSource)}">${escapeHtml(normalizedSource.toUpperCase())}</span>
                     <span class="severity-badge ${severity}">${severity.toUpperCase()}</span>
                 </span>
                 <span class="detection-time">${timestamp ? formatTime(timestamp) : '-'}</span>
@@ -38,6 +77,7 @@ export function renderDetectionItem(detection, source = 'all') {
                 ${owasp !== '-' ? `<span class="tag owasp">OWASP: ${escapeHtml(owasp)}</span>` : ''}
                 ${mitre !== '-' ? `<span class="tag mitre">MITRE: ${escapeHtml(mitre)}</span>` : ''}
                 ${direction !== '-' ? `<span class="tag direction">${escapeHtml(formatLabel(direction))}</span>` : ''}
+                ${waf2DecisionTags}
             </div>
         </div>
     `;

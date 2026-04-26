@@ -594,6 +594,17 @@ body > * { position: relative; z-index: 1; }
 .tag.owasp     { background: var(--accent-dim);         color: var(--accent); }
 .tag.mitre     { background: var(--color-orange-dim);   color: var(--color-orange); }
 .tag.direction { background: var(--color-blue-dim);     color: var(--color-blue); }
+.tag.engine    { background: var(--bg-surface-3);       color: var(--text-secondary); }
+.tag.route     { background: var(--color-purple-dim);   color: var(--color-purple); }
+.tag.rag       { background: var(--color-green-dim);    color: var(--color-green); }
+.tag.rag-muted { background: var(--color-orange-dim);   color: var(--color-orange); }
+.tag.evidence  { background: var(--accent-dim);         color: var(--accent); }
+.tag.route-reason {
+    max-width: 100%;
+    background: var(--bg-surface-3);
+    color: var(--text-secondary);
+    overflow-wrap: anywhere;
+}
 
 .waf-badge {
     display: inline-block;

@@ -70,3 +70,7 @@
 
 - [x] 7.1 Run `openspec validate evaluate-waf2-rag-react-routing-and-models`
 - [ ] 7.2 Review whether `package-waf2-rag-for-one-click-start` can be verified/archived after cold-start demo rehearsal
+
+## 8. Dashboard Visibility
+
+- [x] 8.1 Surface WAF2 RAG, ReAct, and routing path metrics in the dashboard for demos

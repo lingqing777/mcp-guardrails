@@ -671,18 +671,61 @@ function updateWaf1Panel() {
 }
 
 function updateWaf2Panel() {
+    const setText = (id, value) => {
+        const el = document.getElementById(id);
+        if (el) el.textContent = value;
+    };
+
     if (!waf2Data) {
-        document.getElementById('waf2-total').textContent = '-';
-        document.getElementById('waf2-blocked-req').textContent = '-';
-        document.getElementById('waf2-blocked-resp').textContent = '-';
-        document.getElementById('waf2-llm-calls').textContent = '-';
+        [
+            'waf2-total',
+            'waf2-blocked-req',
+            'waf2-blocked-resp',
+            'waf2-llm-calls',
+            'waf2-rag-state',
+            'waf2-rag-queries',
+            'waf2-agent-invocations',
+            'waf2-react-rate'
+        ].forEach(id => setText(id, '-'));
+        setText('waf2-rag-detail', 'KB - 条');
+        setText('waf2-rag-query-detail', '空结果 - / 门控 -');
+        setText('waf2-agent-detail', '工具调用 -');
+        setText('waf2-routing-detail', 'fast - / one-shot - / react -');
+        const ragStateEl = document.getElementById('waf2-rag-state');
+        if (ragStateEl) ragStateEl.className = 'card-value blue';
         return;
     }
 
-    document.getElementById('waf2-total').textContent = waf2Data.summary?.total || 0;
-    document.getElementById('waf2-blocked-req').textContent = waf2Data.by_direction?.request || 0;
-    document.getElementById('waf2-blocked-resp').textContent = waf2Data.by_direction?.response || 0;
-    document.getElementById('waf2-llm-calls').textContent = waf2Data.cache?.llm_calls || 0;
+    const summary = waf2Data.summary || {};
+    const rag = waf2Data.rag || {};
+    const agent = waf2Data.agent || {};
+    const routing = waf2Data.routing || {};
+    const toolCalls = agent.tool_calls || {};
+    const toolCount = Object.values(toolCalls).reduce((sum, value) => sum + Number(value || 0), 0);
+    const routeFast = Number(routing.fast_pass || 0);
+    const routeOneShot = Number(routing.one_shot || 0);
+    const routeReact = Number(routing.react || 0);
+    const totalRequests = Number(summary.total || 0);
+    const reactRate = totalRequests > 0 ? `${((routeReact / totalRequests) * 100).toFixed(1)}%` : '-';
+    const ragLatency = rag.avg_latency_ms !== undefined ? `${rag.avg_latency_ms}ms` : '-';
+
+    setText('waf2-total', summary.total || 0);
+    setText('waf2-blocked-req', waf2Data.by_direction?.request || 0);
+    setText('waf2-blocked-resp', waf2Data.by_direction?.response || 0);
+    setText('waf2-llm-calls', waf2Data.cache?.llm_calls || 0);
+
+    const ragStateEl = document.getElementById('waf2-rag-state');
+    if (ragStateEl) {
+        ragStateEl.className = `card-value ${rag.enabled ? 'green' : 'red'}`;
+    }
+    setText('waf2-rag-state', rag.enabled ? 'ON' : 'OFF');
+    setText('waf2-rag-detail', `KB ${rag.knowledge_base_size || 0} 条 / 平均 ${ragLatency}`);
+    setText('waf2-rag-queries', rag.queries || 0);
+    setText('waf2-rag-query-detail', `空结果 ${rag.empty_results || 0} / 门控 ${rag.gated || 0}`);
+    setText('waf2-agent-invocations', agent.invocations || 0);
+    setText('waf2-agent-detail', `工具调用 ${toolCount} 次 / fallback ${routing.agent_fallback || 0}`);
+    setText('waf2-react-rate', reactRate);
+    setText('waf2-routing-detail', `fast ${routeFast} / one-shot ${routeOneShot} / react ${routeReact}`);
 
     renderBarChart('waf2-category-chart', waf2Data.by_category || {}, 'default');
     renderDetectionList('waf2-detections', waf2Data.recent_detections || [], 'waf2');
