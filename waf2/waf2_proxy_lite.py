@@ -824,6 +824,55 @@ _SALVAGE_CAT_RE = re.compile(
 )
 
 
+def _compact_key(key: Any) -> str:
+    return re.sub(r'[^a-z_]', '', str(key).lower())
+
+
+def _looks_like_final_answer(value: Any) -> bool:
+    if not isinstance(value, dict):
+        return False
+    keys = {_compact_key(k) for k in value.keys()}
+    return bool({'verdict', 'decision'} & keys)
+
+
+def _normalize_final_answer(value: Dict[str, Any]) -> Dict[str, Any]:
+    final = dict(value)
+    for key in list(final.keys()):
+        compact = _compact_key(key)
+        if ('verdict' in compact or compact == 'decision') and 'verdict' not in final:
+            final['verdict'] = final[key]
+        elif 'category' in compact and 'category' not in final:
+            final['category'] = final[key]
+        elif 'reason' in compact and 'reason' not in final:
+            final['reason'] = final[key]
+        elif 'evidence' in compact and 'evidence_ids' not in final:
+            final['evidence_ids'] = final[key]
+    return final
+
+
+def _normalize_agent_action(obj: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+    """Normalize common model output drift into the expected ReAct action shape."""
+    if not isinstance(obj, dict):
+        return None
+    if 'action' not in obj and _looks_like_final_answer(obj):
+        return {'action': 'final_answer', 'action_input': _normalize_final_answer(obj)}
+    if 'action' not in obj:
+        return None
+
+    name = obj.get('action')
+    args = obj.get('action_input')
+    if isinstance(name, dict) and _looks_like_final_answer(name):
+        return {'action': 'final_answer', 'action_input': _normalize_final_answer(name)}
+    if isinstance(args, dict) and _looks_like_final_answer(args):
+        obj = dict(obj)
+        obj['action'] = 'final_answer'
+        obj['action_input'] = _normalize_final_answer(args)
+        return obj
+    if isinstance(name, str):
+        return obj
+    return None
+
+
 def _parse_agent_action(text: str) -> Optional[Dict[str, Any]]:
     m = _ACTION_RE.search(text or '')
     raw = m.group(1).strip() if m else (text or '').strip()
@@ -834,8 +883,9 @@ def _parse_agent_action(text: str) -> Optional[Dict[str, Any]]:
             raw = raw[s:e + 1]
     try:
         obj = json.loads(raw)
-        if isinstance(obj, dict) and 'action' in obj:
-            return obj
+        normalized = _normalize_agent_action(obj)
+        if normalized:
+            return normalized
     except Exception:
         pass
     if _SALVAGE_BLOCK_RE.search(text or ''):
@@ -870,6 +920,8 @@ def run_react_agent(prompt: str, max_iters: int = 4) -> Optional[Dict[str, Any]]
             print(f"[WAF2][Agent] 无法解析动作(step={step}): {raw[:200]}")
             return None
         name = action.get('action', '')
+        if not isinstance(name, str):
+            name = str(name)
         args = action.get('action_input') or {}
         if not isinstance(args, dict):
             args = {'text': str(args)}
@@ -896,6 +948,7 @@ def _tools_doc() -> str:
 
 
 def _verdict_to_result(final: Dict[str, Any], direction: str) -> Optional[Dict[str, Any]]:
+    final = _normalize_final_answer(final)
     verdict = str(final.get('verdict', '')).upper()
     evidence_ids = final.get('evidence_ids', [])
     if not isinstance(evidence_ids, list):
