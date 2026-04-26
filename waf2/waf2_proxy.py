@@ -96,6 +96,8 @@ class WAF2Config:
         self.rag_threshold = float(os.environ.get("RAG_THRESHOLD", "0.60"))
         self.rag_confidence_threshold = float(os.environ.get("RAG_CONFIDENCE_THRESHOLD", "0.50"))
         # Agent 迭代深度
+        self.react_routing_enabled = os.environ.get("REACT_ROUTING_ENABLED", "true").lower() == "true"
+        self.react_rag_score_threshold = float(os.environ.get("REACT_RAG_SCORE_THRESHOLD", "0.68"))
         self.agent_max_iters_request = int(os.environ.get("AGENT_MAX_ITERS_REQUEST", "4"))
         self.agent_max_iters_response = int(os.environ.get("AGENT_MAX_ITERS_RESPONSE", "3"))
 
@@ -121,6 +123,8 @@ class ConfigUpdate(BaseModel):
     rag_top_k: Optional[int] = None
     rag_threshold: Optional[float] = None
     rag_confidence_threshold: Optional[float] = None
+    react_routing_enabled: Optional[bool] = None
+    react_rag_score_threshold: Optional[float] = None
     agent_max_iters_request: Optional[int] = None
     agent_max_iters_response: Optional[int] = None
 
@@ -182,6 +186,11 @@ stats = {
     'agent_invocations': 0,
     'agent_tool_calls': defaultdict(int),
     'agent_salvaged': 0,
+    # Route 统计
+    'route_fast_pass': 0,
+    'route_one_shot': 0,
+    'route_react': 0,
+    'route_agent_fallback': 0,
 }
 
 # ==================== RAG 知识增强 ====================
@@ -394,8 +403,152 @@ def static_sensitive_prefilter(body: str) -> Optional[Dict[str, Any]]:
                 'severity_score': SEVERITY_SCORES[cat_info['severity']],
                 'owasp': cat_info['owasp'], 'mitre': cat_info['mitre'],
                 'engine': 'static_sensitive',
-            }
+                }
     return None
+
+
+PERCENT_ENC_RE = re.compile(r'%[0-9a-fA-F]{2}')
+BASE64_CANDIDATE_RE = re.compile(r'\b[A-Za-z0-9+/]{28,}={0,2}\b')
+HEX_ESCAPE_RE = re.compile(r'(?:\\x[0-9a-fA-F]{2}|0x[0-9a-fA-F]{8,}|%u[0-9a-fA-F]{4})')
+UNICODE_ESCAPE_RE = re.compile(r'\\u[0-9a-fA-F]{4}')
+MCP_TOOL_RE = re.compile(r'\b(?:mcp|tool_def|tool_calls?|function_call|resource|sampling|jsonrpc|stdio)\b', re.IGNORECASE)
+PROMPT_GRAY_RE = re.compile(
+    r'(?:system prompt|hidden instructions?|developer message|\bDAN\b|jailbreak|prompt leak|'
+    r'ignore (?:the )?(?:system|safety|policy)|忽略|系统提示|越狱|开发者消息)',
+    re.IGNORECASE,
+)
+EXFIL_RE = re.compile(
+    r'(?:exfil|leak|dump|send_email|webhook|callback|collector|attacker|'
+    r'ipfs|pastebin|discord|telegram|slack|s3://|gopher://|ftp://|https?://)',
+    re.IGNORECASE,
+)
+HIGH_RISK_FIELD_RE = re.compile(
+    r'\b(?:cmd|exec|command|query|sql|url|uri|path|file|filename|xml|template|'
+    r'payload|prompt|instruction|tool|description|callback|webhook|redirect|return_url|'
+    r'pickle|serialized|deserialize|data)\b',
+    re.IGNORECASE,
+)
+FAST_PASS_PATH_RE = re.compile(
+    r'^/(?:$|health$|favicon\.ico$|static/|assets/|images?/|tienda1/imagenes/|'
+    r'api/(?:users|products|orders|comments|settings)(?:[/?]|$))',
+    re.IGNORECASE,
+)
+BUSINESS_FORM_PATH_RE = re.compile(
+    r'/(?:login|auth|autenticar|entrar|registro|editar|pagar|checkout|order|profile|miembros|publico)/',
+    re.IGNORECASE,
+)
+
+
+def _decode_url_twice(text: str) -> str:
+    try:
+        once = urllib.parse.unquote_plus(text or '')
+        twice = urllib.parse.unquote_plus(once)
+        return twice
+    except Exception:
+        return text or ''
+
+
+def decoded_static_prefilter(url: str, body: str) -> Optional[Dict[str, Any]]:
+    """对 URL/body 做最多两次 URL decode 后再跑静态规则, 用于替代昂贵的 ReAct 解码循环。"""
+    decoded_url = _decode_url_twice(url)
+    decoded_body = _decode_url_twice(body)
+    if decoded_url == (url or '') and decoded_body == (body or ''):
+        return None
+    hit = static_rule_check(decoded_url, decoded_body)
+    if not hit:
+        return None
+    hit = dict(hit)
+    hit['reason'] = f"URL 解码后{hit.get('reason', '命中静态规则')}"
+    hit['engine'] = 'decoded_static'
+    return hit
+
+
+def _is_business_form_context(path: str, body: str) -> bool:
+    blob = f"{path or ''}\n{body or ''}".lower()
+    if not BUSINESS_FORM_PATH_RE.search(path or ''):
+        return False
+    business_fields = ('password=', 'pwd=', 'email=', 'dni=', 'ntc=', 'precio=', 'login=', 'remember=')
+    return any(field in blob for field in business_fields)
+
+
+def _has_secret_prefix(blob: str) -> bool:
+    return bool(re.search(
+        r'(?:sk-[A-Za-z0-9_-]{24,}|gh[pousr]_[A-Za-z0-9_]{24,}|AKIA[A-Z0-9]{16}|'
+        r'xox[baprs]-[A-Za-z0-9-]{20,}|glpat-[A-Za-z0-9_-]{20,}|eyJ[A-Za-z0-9_-]{10,}\.eyJ)',
+        blob or '',
+        re.IGNORECASE,
+    ))
+
+
+def route_request(method: str, path: str, body: str, rag_used: bool, top_score: float) -> Dict[str, Any]:
+    """Decide whether a gray request needs fast-pass, one-shot LLM, or deep ReAct tools."""
+    raw_blob = f"{path or ''}\n{body or ''}"
+    decoded_blob = _decode_url_twice(raw_blob)
+    lower_decoded = decoded_blob.lower()
+    percent_count = len(PERCENT_ENC_RE.findall(raw_blob))
+    double_encoded = '%25' in raw_blob.lower()
+    encoded_static_hit = static_rule_check(decoded_blob, '')
+    base64_candidates = BASE64_CANDIDATE_RE.findall(body or '')
+    looks_like_base64 = any(len(token) >= 32 and len(token) % 4 == 0 for token in base64_candidates)
+
+    reasons = []
+    if percent_count:
+        reasons.append(f'percent_enc={percent_count}')
+    if double_encoded:
+        reasons.append('double_encoded')
+    if encoded_static_hit:
+        reasons.append('decoded_static_signal')
+    if looks_like_base64:
+        reasons.append('base64_candidate')
+    if HEX_ESCAPE_RE.search(raw_blob):
+        reasons.append('hex_escape')
+    if UNICODE_ESCAPE_RE.search(raw_blob):
+        reasons.append('unicode_escape')
+    if MCP_TOOL_RE.search(raw_blob):
+        reasons.append('mcp_tool_surface')
+    if PROMPT_GRAY_RE.search(raw_blob):
+        reasons.append('prompt_gray_signal')
+    if EXFIL_RE.search(raw_blob):
+        reasons.append('exfil_signal')
+    if HIGH_RISK_FIELD_RE.search(raw_blob):
+        reasons.append('high_risk_field')
+    if _has_secret_prefix(raw_blob):
+        reasons.append('secret_prefix')
+    if rag_used:
+        reasons.append(f'rag_score={top_score:.3f}')
+
+    business_form = _is_business_form_context(path, body)
+    high_rag = rag_used and top_score >= config.react_rag_score_threshold
+    deep_obfuscation = bool(
+        encoded_static_hit
+        or double_encoded
+        or looks_like_base64
+        or HEX_ESCAPE_RE.search(raw_blob)
+        or UNICODE_ESCAPE_RE.search(raw_blob)
+    )
+    agent_surface = bool(MCP_TOOL_RE.search(raw_blob) or PROMPT_GRAY_RE.search(raw_blob) or EXFIL_RE.search(raw_blob))
+
+    if deep_obfuscation or agent_surface or high_rag or _has_secret_prefix(raw_blob):
+        route = 'react'
+    elif (
+        not reasons
+        and method.upper() in {'GET', 'HEAD'}
+        and (FAST_PASS_PATH_RE.search(path or '') or len(raw_blob) < 180)
+    ):
+        route = 'fast_pass'
+    else:
+        route = 'one_shot'
+
+    if business_form and route == 'react' and not (deep_obfuscation or agent_surface or high_rag):
+        route = 'one_shot'
+
+    return {
+        'route': route,
+        'reasons': reasons,
+        'business_form': business_form,
+        'percent_count': percent_count,
+        'decoded_changed': decoded_blob != raw_blob,
+    }
 
 
 # ==================== LLM 调用 ====================
@@ -830,6 +983,39 @@ Action:
 Thought:"""
 
 
+REQUEST_ONESHOT_PROMPT = """你是 WAF2 的请求安全判定器。前置静态规则、关键词层和必要的轻量解码规则已完成，未命中。
+当前请求不需要调用工具；请只做一次语义判断并输出严格 JSON。
+
+## 历史攻击证据 (RAG 知识库检索, 按相似度降序)
+{retrieved_context}
+
+{taxonomy}
+
+{secrets_table}
+
+## 路由信号
+{route_context}
+
+## 请求信息
+- method: {method}
+- path: {path}
+- body(前500字): {body}
+
+## 判定规则
+1. 当前请求如果与 RAG 证据形态一致，可以 BLOCK 并引用 evidence_ids。
+2. 没有明确攻击指标时，必须 PASS；不要因为字段名普通敏感就拦截。
+3. 请求侧 `sensitive_data_exposure` 只用于**出站外泄/攻击链**，例如把 secret 发到 webhook、外部 URL、邮件、IPFS/CDN collector、恶意 tool call。
+4. 正常业务表单里的 `password`、`pwd`、`email`、`dni`、`ntc`、支付/注册/登录字段，如果只是提交给被保护应用自身，不能按 sensitive_data_exposure 拦截。
+5. 若证据不足，不要输出 INCONCLUSIVE；输出 PASS。
+
+## 输出格式
+只输出 JSON，不要 markdown、解释、Thought 或前后缀：
+{{"decision":"PASS","category":"none","reason":"正常请求","evidence_ids":[]}}
+或
+{{"decision":"BLOCK","category":"<攻击类型>","reason":"<简短原因>","evidence_ids":["kb#1"]}}
+"""
+
+
 REACT_RESPONSE_PROMPT = """你是 WAF2 的数据泄露检测 Agent。前置的敏感模式正则扫描已完成，未命中；
 你的任务是判断响应中是否存在**需要语义理解**的泄露（业务字段组合、被轻度混淆的凭据、堆栈/调试信息等）。
 
@@ -1083,6 +1269,35 @@ def _verdict_to_result(final: Dict[str, Any], direction: str) -> Optional[Dict[s
     return None
 
 
+def one_shot_analyze_request(
+    method: str,
+    path: str,
+    body: str,
+    retrieved_context: str,
+    route_info: Dict[str, Any],
+) -> Dict[str, Any]:
+    route_context = (
+        f"route=one_shot; reasons={route_info.get('reasons', [])}; "
+        f"business_form={route_info.get('business_form', False)}; "
+        f"percent_count={route_info.get('percent_count', 0)}; "
+        f"decoded_changed={route_info.get('decoded_changed', False)}"
+    )
+    prompt = REQUEST_ONESHOT_PROMPT.format(
+        retrieved_context=retrieved_context,
+        taxonomy=ATTACK_TAXONOMY,
+        secrets_table=KNOWN_SECRET_PREFIXES_TABLE,
+        route_context=route_context,
+        method=method,
+        path=path,
+        body=(body[:500] if body else '(空)'),
+    )
+    raw = call_llm(prompt)
+    result = parse_llm_result(raw, 'request')
+    result['engine'] = 'llm_one_shot'
+    result['route'] = 'one_shot'
+    return result
+
+
 def agent_analyze_request(method: str, path: str, body: str, retrieved_context: str) -> Optional[Dict[str, Any]]:
     prompt = REACT_REQUEST_PROMPT.format(
         retrieved_context=retrieved_context,
@@ -1117,11 +1332,14 @@ def agent_analyze_response(status_code: int, body: str, retrieved_context: str) 
 # ==================== 调度入口 (analyze_*) ====================
 
 def analyze_request(method: str, path: str, body: str) -> Dict[str, Any]:
-    """分析请求 (静态关键词 → RAG 检索 → ReAct Agent, 全程缓存)"""
+    """分析请求 (静态关键词/轻量解码 → RAG → route → one-shot/ReAct, 全程缓存)"""
     if not config.request_analysis:
         return {'blocked': False, 'direction': 'request'}
 
-    cache_dims = f"rag={int(config.rag_enabled)}|scope={config.rag_scope}|model={config.model}|fmt={config.format}|tools=full"
+    cache_dims = (
+        f"rag={int(config.rag_enabled)}|scope={config.rag_scope}|model={config.model}|fmt={config.format}|"
+        f"tools=full|routing={int(config.react_routing_enabled)}|react_rag={config.react_rag_score_threshold:.2f}"
+    )
     cache_key = f"req:{cache_dims}:{method}:{path}:{body[:200]}"
 
     if config.cache_enabled:
@@ -1138,6 +1356,13 @@ def analyze_request(method: str, path: str, body: str) -> Dict[str, Any]:
         print(f"[WAF2] 请求分析(static_keyword): BLOCK [{kw_hit.get('category')}] {kw_hit.get('reason')}")
         return kw_hit
 
+    decoded_hit = decoded_static_prefilter(path, body)
+    if decoded_hit:
+        if config.cache_enabled:
+            llm_cache.set(cache_key, decoded_hit)
+        print(f"[WAF2] 请求分析(decoded_static): BLOCK [{decoded_hit.get('category')}] {decoded_hit.get('reason')}")
+        return decoded_hit
+
     # 层 3a: RAG 检索 (头部预注入用)
     rag_input = _build_request_rag_input(method, path, body)
     retrieved_context, rag_used_raw, top_score = _do_rag_retrieve(rag_input)
@@ -1148,24 +1373,67 @@ def analyze_request(method: str, path: str, body: str) -> Dict[str, Any]:
         retrieved_context = format_retrieved_context([])
     rag_used = rag_used_raw and not rag_gated
 
-    # 层 3b: ReAct Agent
+    route_info = route_request(method, path, body, rag_used, top_score)
+    route = route_info['route'] if config.react_routing_enabled else 'react'
+
+    if route == 'fast_pass':
+        stats['route_fast_pass'] += 1
+        fast = {
+            'blocked': False, 'direction': 'request',
+            'engine': 'route_fast_pass', 'route': 'fast_pass',
+            'rag_augmented': rag_used, 'rag_gated': rag_gated,
+            'rag_top_score': round(top_score, 4) if top_score else 0.0,
+            'route_reasons': route_info.get('reasons', []),
+        }
+        if config.cache_enabled:
+            llm_cache.set(cache_key, fast)
+        print(f"[WAF2] 请求分析(route_fast_pass): PASS (top_score={top_score:.3f})")
+        return fast
+
+    if route == 'one_shot':
+        stats['route_one_shot'] += 1
+        stats['llm_calls'] += 1
+        one_shot_result = one_shot_analyze_request(method, path, body, retrieved_context, route_info)
+        one_shot_result['rag_augmented'] = rag_used
+        one_shot_result['rag_gated'] = rag_gated
+        one_shot_result['rag_top_score'] = round(top_score, 4) if top_score else 0.0
+        one_shot_result['route_reasons'] = route_info.get('reasons', [])
+        if config.cache_enabled:
+            llm_cache.set(cache_key, one_shot_result)
+        verdict_str = 'BLOCK' if one_shot_result.get('blocked') else 'PASS'
+        print(
+            f"[WAF2] 请求分析(OneShot+RAG): {verdict_str} "
+            f"(rag_used={rag_used}, top_score={top_score:.3f}, reasons={route_info.get('reasons', [])})"
+        )
+        return one_shot_result
+
+    # 深层路径: ReAct Agent
+    stats['route_react'] += 1
     stats['llm_calls'] += 1
     agent_result = agent_analyze_request(method, path, body, retrieved_context)
     if agent_result is not None:
         agent_result['rag_augmented'] = rag_used
         agent_result['rag_gated'] = rag_gated
         agent_result['rag_top_score'] = round(top_score, 4) if top_score else 0.0
+        agent_result['route'] = 'react'
+        agent_result['route_reasons'] = route_info.get('reasons', [])
         if config.cache_enabled:
             llm_cache.set(cache_key, agent_result)
         verdict_str = 'BLOCK' if agent_result.get('blocked') else 'PASS'
-        print(f"[WAF2] 请求分析(Agent+RAG): {verdict_str} (rag_used={rag_used}, top_score={top_score:.3f})")
+        print(
+            f"[WAF2] 请求分析(Agent+RAG): {verdict_str} "
+            f"(rag_used={rag_used}, top_score={top_score:.3f}, reasons={route_info.get('reasons', [])})"
+        )
         return agent_result
 
     print("[WAF2] ⚠️ Agent 请求分析失败，放行")
+    stats['route_agent_fallback'] += 1
     fail = {
         'blocked': False, 'direction': 'request', 'llm_error': True,
         'rag_augmented': rag_used, 'rag_gated': rag_gated,
         'rag_top_score': round(top_score, 4) if top_score else 0.0,
+        'route': 'react',
+        'route_reasons': route_info.get('reasons', []),
     }
     if config.cache_enabled:
         llm_cache.set(cache_key, fail)
@@ -1256,7 +1524,11 @@ def parse_llm_result(result: str, direction: str) -> Dict[str, Any]:
             if not isinstance(evidence_ids, list):
                 evidence_ids = []
             if decision == "PASS":
-                return {'blocked': False, 'direction': direction}
+                return {
+                    'blocked': False, 'direction': direction,
+                    'reason': reason or "正常请求",
+                    'evidence_ids': evidence_ids,
+                }
             if decision == "INCONCLUSIVE":
                 return {
                     'blocked': False, 'direction': direction,
@@ -1340,6 +1612,8 @@ def _config_snapshot() -> Dict[str, Any]:
         'rag_top_k': config.rag_top_k,
         'rag_threshold': config.rag_threshold,
         'rag_confidence_threshold': config.rag_confidence_threshold,
+        'react_routing_enabled': config.react_routing_enabled,
+        'react_rag_score_threshold': config.react_rag_score_threshold,
         'agent_max_iters_request': config.agent_max_iters_request,
         'agent_max_iters_response': config.agent_max_iters_response,
         'knowledge_base_size': kb_size,
@@ -1391,6 +1665,10 @@ async def update_config(update: ConfigUpdate):
             rag_engine.threshold = config.rag_threshold
     if update.rag_confidence_threshold is not None:
         config.rag_confidence_threshold = max(0.0, min(1.0, float(update.rag_confidence_threshold)))
+    if update.react_routing_enabled is not None:
+        config.react_routing_enabled = bool(update.react_routing_enabled)
+    if update.react_rag_score_threshold is not None:
+        config.react_rag_score_threshold = max(0.0, min(1.0, float(update.react_rag_score_threshold)))
     if update.agent_max_iters_request is not None:
         config.agent_max_iters_request = max(1, int(update.agent_max_iters_request))
     if update.agent_max_iters_response is not None:
@@ -1514,6 +1792,10 @@ async def get_stats():
         'agent_invocations': stats['agent_invocations'],
         'agent_tool_calls': dict(stats['agent_tool_calls']),
         'agent_salvaged': stats['agent_salvaged'],
+        'route_fast_pass': stats['route_fast_pass'],
+        'route_one_shot': stats['route_one_shot'],
+        'route_react': stats['route_react'],
+        'route_agent_fallback': stats['route_agent_fallback'],
     }
 
 
@@ -1562,6 +1844,14 @@ async def get_dashboard():
             'salvaged': stats['agent_salvaged'],
             'tools_available': list(AGENT_TOOLS.keys()),
         },
+        'routing': {
+            'enabled': config.react_routing_enabled,
+            'react_rag_score_threshold': config.react_rag_score_threshold,
+            'fast_pass': stats['route_fast_pass'],
+            'one_shot': stats['route_one_shot'],
+            'react': stats['route_react'],
+            'agent_fallback': stats['route_agent_fallback'],
+        },
         'recent_detections': stats['detections'][-10:],
     }
 
@@ -1595,6 +1885,10 @@ async def reset_stats():
     stats['agent_invocations'] = 0
     stats['agent_tool_calls'].clear()
     stats['agent_salvaged'] = 0
+    stats['route_fast_pass'] = 0
+    stats['route_one_shot'] = 0
+    stats['route_react'] = 0
+    stats['route_agent_fallback'] = 0
     return {'success': True, 'message': '统计数据已重置'}
 
 
@@ -1851,8 +2145,10 @@ if __name__ == "__main__":
           f"top_k={config.rag_top_k}, threshold={config.rag_threshold}")
     print(f"  Agent:    tools={list(AGENT_TOOLS.keys())}, "
           f"max_iters={config.agent_max_iters_request}/{config.agent_max_iters_response}")
+    print(f"  Routing:  enabled={config.react_routing_enabled}, "
+          f"react_rag_score={config.react_rag_score_threshold}")
     print(f"  Eval:     mode={config.eval_mode}, fail_closed={config.eval_fail_closed}")
-    print(f"  Pipeline: STATIC_RULES → KEYWORDS → RAG → ReAct Agent (request) ;"
+    print(f"  Pipeline: STATIC_RULES → KEYWORDS → DECODED_STATIC → RAG → Router → OneShot/ReAct (request) ;"
           f" SENSITIVE → RAG(scope=all) → Agent (response)")
     print("=" * 60)
     uvicorn.run(app, host="0.0.0.0", port=8081)
