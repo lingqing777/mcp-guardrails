@@ -6,8 +6,8 @@ WORKDIR /app
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
-# WAF2 主程序
-COPY waf2_proxy.py .
+# WAF2 主程序及依赖模块
+COPY waf2_proxy.py normalization.py local_attack_score.py risk_router.py .
 
 # RAG 模块代码 (.dockerignore 已排除 rag/scripts/, 只 COPY 运行时必要部分)
 COPY rag/__init__.py rag/schema.py rag/embedder.py \
