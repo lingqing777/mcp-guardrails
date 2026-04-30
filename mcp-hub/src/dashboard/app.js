@@ -682,11 +682,15 @@ function updateWaf2Panel() {
             'waf2-blocked-req',
             'waf2-blocked-resp',
             'waf2-llm-calls',
+            'waf2-local-mode',
+            'waf2-score-blocks',
             'waf2-rag-state',
             'waf2-rag-queries',
             'waf2-agent-invocations',
             'waf2-react-rate'
         ].forEach(id => setText(id, '-'));
+        setText('waf2-local-detail', 'provider - / model -');
+        setText('waf2-score-detail', 'gray - / threshold -');
         setText('waf2-rag-detail', 'KB - 条');
         setText('waf2-rag-query-detail', '空结果 - / 门控 -');
         setText('waf2-agent-detail', '工具调用 -');
@@ -700,11 +704,13 @@ function updateWaf2Panel() {
     const rag = waf2Data.rag || {};
     const agent = waf2Data.agent || {};
     const routing = waf2Data.routing || {};
+    const localFirst = waf2Data.local_first || {};
+    const localScore = waf2Data.local_attack_score || {};
     const toolCalls = agent.tool_calls || {};
     const toolCount = Object.values(toolCalls).reduce((sum, value) => sum + Number(value || 0), 0);
     const routeFast = Number(routing.fast_pass || 0);
-    const routeOneShot = Number(routing.one_shot || 0);
-    const routeReact = Number(routing.react || 0);
+    const routeOneShot = Number(routing.local_llm_one_shot ?? routing.one_shot ?? 0);
+    const routeReact = Number(routing.react_deep_inspection ?? routing.react ?? 0);
     const totalRequests = Number(summary.total || 0);
     const reactRate = totalRequests > 0 ? `${((routeReact / totalRequests) * 100).toFixed(1)}%` : '-';
     const ragLatency = rag.avg_latency_ms !== undefined ? `${rag.avg_latency_ms}ms` : '-';
@@ -713,6 +719,20 @@ function updateWaf2Panel() {
     setText('waf2-blocked-req', waf2Data.by_direction?.request || 0);
     setText('waf2-blocked-resp', waf2Data.by_direction?.response || 0);
     setText('waf2-llm-calls', waf2Data.cache?.llm_calls || 0);
+
+    const localModeEl = document.getElementById('waf2-local-mode');
+    const locality = localFirst.provider_locality || 'unknown';
+    const privacy = localFirst.privacy_mode || '-';
+    if (localModeEl) {
+        localModeEl.className = `card-value ${locality === 'local' ? 'green' : locality === 'online' ? 'yellow' : 'blue'}`;
+    }
+    setText('waf2-local-mode', locality === 'local' ? 'LOCAL' : locality === 'online' ? 'ONLINE' : locality.toUpperCase());
+    setText('waf2-local-detail', `${privacy} / ${localFirst.model || '-'}`);
+    setText('waf2-score-blocks', localScore.direct_blocks || 0);
+    setText(
+        'waf2-score-detail',
+        `gray ${localScore.gray_zone || 0} / threshold ${localScore.block_threshold ?? '-'}`
+    );
 
     const ragStateEl = document.getElementById('waf2-rag-state');
     if (ragStateEl) {
@@ -725,7 +745,7 @@ function updateWaf2Panel() {
     setText('waf2-agent-invocations', agent.invocations || 0);
     setText('waf2-agent-detail', `工具调用 ${toolCount} 次 / fallback ${routing.agent_fallback || 0}`);
     setText('waf2-react-rate', reactRate);
-    setText('waf2-routing-detail', `fast ${routeFast} / one-shot ${routeOneShot} / react ${routeReact}`);
+    setText('waf2-routing-detail', `fast ${routeFast} / llm ${routeOneShot} / deep ${routeReact}`);
 
     renderBarChart('waf2-category-chart', waf2Data.by_category || {}, 'default');
     renderDetectionList('waf2-detections', waf2Data.recent_detections || [], 'waf2');

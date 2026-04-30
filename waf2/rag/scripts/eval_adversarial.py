@@ -44,6 +44,7 @@ def load_dataset(path: Path):
 
 
 def post_config(waf2_url: str, payload: dict) -> None:
+    waf2_url = waf2_url.rstrip("/")
     req = urllib.request.Request(
         f"{waf2_url}/waf2/config",
         data=json.dumps(payload).encode(),
@@ -53,7 +54,14 @@ def post_config(waf2_url: str, payload: dict) -> None:
     urllib.request.urlopen(req, timeout=10).read()
 
 
+def get_config(waf2_url: str) -> dict:
+    waf2_url = waf2_url.rstrip("/")
+    with urllib.request.urlopen(f"{waf2_url}/waf2/config", timeout=10) as resp:
+        return json.loads(resp.read().decode("utf-8", errors="ignore"))
+
+
 def reset_stats(waf2_url: str) -> None:
+    waf2_url = waf2_url.rstrip("/")
     for endpoint in ("/waf2/reset", "/waf2/cache/clear"):
         urllib.request.urlopen(
             urllib.request.Request(f"{waf2_url}{endpoint}", method="POST"),
@@ -62,6 +70,7 @@ def reset_stats(waf2_url: str) -> None:
 
 
 def send_one(waf2_url: str, method: str, path: str, body):
+    waf2_url = waf2_url.rstrip("/")
     url = f"{waf2_url}{path}"
     if isinstance(body, str) and body:
         data = body.encode()
@@ -92,7 +101,12 @@ def send_one(waf2_url: str, method: str, path: str, body):
 
 
 def run_round(waf2_url: str, rag_on: bool, attacks, benign, label: str):
-    post_config(waf2_url, {"rag_enabled": rag_on})
+    post_config(waf2_url, {
+        "rag_enabled": rag_on,
+        "eval_mode": True,
+        "eval_fail_closed": False,
+        "response_analysis": False,
+    })
     reset_stats(waf2_url)
     time.sleep(0.5)
 
@@ -152,8 +166,24 @@ def main():
     attacks, benign = load_dataset(dataset_path)
     print(f"加载: 攻击 {len(attacks)} 条, 良性 {len(benign)} 条")
 
-    off = run_round(args.waf2, False, attacks, benign, "RAG OFF")
-    on = run_round(args.waf2, True, attacks, benign, "RAG ON")
+    previous_config = {}
+    try:
+        previous_config = get_config(args.waf2)
+    except Exception as exc:
+        print(f"⚠️  无法读取原始 WAF2 配置, 评估后不会自动恢复: {exc}")
+
+    try:
+        off = run_round(args.waf2, False, attacks, benign, "RAG OFF")
+        on = run_round(args.waf2, True, attacks, benign, "RAG ON")
+    finally:
+        if previous_config:
+            restore_keys = [
+                "rag_enabled",
+                "eval_mode",
+                "eval_fail_closed",
+                "response_analysis",
+            ]
+            post_config(args.waf2, {k: previous_config[k] for k in restore_keys if k in previous_config})
 
     print("\n" + "=" * 70)
     print(f"{'指标':<14s} {'OFF':>10s} {'ON':>10s} {'变化':>10s}")

@@ -71,6 +71,51 @@ app.add_middleware(
 import os
 from pydantic import BaseModel
 
+from normalization import normalize_request
+from local_attack_score import score_request
+from risk_router import (
+    ROUTE_FAST_PASS,
+    ROUTE_FALLBACK,
+    ROUTE_KNOWLEDGE_EVIDENCE,
+    ROUTE_LOCAL_LLM,
+    ROUTE_REACT,
+    ROUTE_STATIC_BLOCK,
+    decide_route,
+)
+
+
+def _infer_provider_locality(base_url: str, explicit: str = "") -> str:
+    """Infer whether an OpenAI-compatible endpoint is local or online."""
+    if explicit in {"local", "online", "mixed"}:
+        return explicit
+    lowered = (base_url or "").lower()
+    local_markers = (
+        "localhost",
+        "127.0.0.1",
+        "0.0.0.0",
+        "host.docker.internal",
+        "ollama",
+        "vllm",
+        "localai",
+        "llama.cpp",
+    )
+    return "local" if any(marker in lowered for marker in local_markers) else "online"
+
+
+def _infer_local_provider_name(base_url: str) -> str:
+    lowered = (base_url or "").lower()
+    if "11434" in lowered or "ollama" in lowered:
+        return "ollama"
+    if "vllm" in lowered:
+        return "vllm"
+    if "localai" in lowered:
+        return "localai"
+    if "llama" in lowered:
+        return "llama.cpp"
+    if _infer_provider_locality(base_url) == "local":
+        return "custom-local"
+    return ""
+
 
 class WAF2Config:
     """动态配置 (可通过 /waf2/config API 修改)"""
@@ -81,6 +126,23 @@ class WAF2Config:
         self.base_url = os.environ.get("LLM_BASE_URL", "https://dashscope.aliyuncs.com/compatible-mode/v1")
         self.model = os.environ.get("LLM_MODEL", "qwen-turbo")
         self.format = os.environ.get("LLM_FORMAT", "openai")
+        # Local-first privacy and provider metadata. Online providers remain supported as explicit baselines.
+        self.local_first_enabled = os.environ.get("LOCAL_FIRST_ENABLED", "true").lower() == "true"
+        self.provider_locality = _infer_provider_locality(
+            self.base_url,
+            os.environ.get("PROVIDER_LOCALITY", "").lower(),
+        )
+        self.privacy_mode = os.environ.get(
+            "PRIVACY_MODE",
+            "local_only" if self.provider_locality == "local" else "online_provider",
+        )
+        self.local_provider_name = os.environ.get("LOCAL_PROVIDER_NAME", _infer_local_provider_name(self.base_url))
+        self.fail_policy = os.environ.get("WAF2_FAIL_POLICY", "fail_open").lower()
+        self.llm_timeout_seconds = int(os.environ.get("LLM_TIMEOUT_SECONDS", "30"))
+        self.llm_max_tokens = int(os.environ.get(
+            "LLM_MAX_TOKENS",
+            "220" if self.provider_locality == "local" else "600",
+        ))
         self.request_analysis = True
         self.response_analysis = True
         self.cache_enabled = True
@@ -100,6 +162,13 @@ class WAF2Config:
         self.react_rag_score_threshold = float(os.environ.get("REACT_RAG_SCORE_THRESHOLD", "0.68"))
         self.agent_max_iters_request = int(os.environ.get("AGENT_MAX_ITERS_REQUEST", "4"))
         self.agent_max_iters_response = int(os.environ.get("AGENT_MAX_ITERS_RESPONSE", "3"))
+        # Local attack score / router thresholds.
+        self.local_attack_score_enabled = os.environ.get("LOCAL_ATTACK_SCORE_ENABLED", "true").lower() == "true"
+        self.local_score_direct_block_enabled = os.environ.get("LOCAL_SCORE_DIRECT_BLOCK_ENABLED", "true").lower() == "true"
+        self.local_score_block_threshold = float(os.environ.get("LOCAL_SCORE_BLOCK_THRESHOLD", "0.88"))
+        self.local_score_gray_threshold = float(os.environ.get("LOCAL_SCORE_GRAY_THRESHOLD", "0.35"))
+        self.local_score_fast_pass_threshold = float(os.environ.get("LOCAL_SCORE_FAST_PASS_THRESHOLD", "0.12"))
+        self.local_fast_pass_enabled = os.environ.get("LOCAL_FAST_PASS_ENABLED", "true").lower() == "true"
 
 
 config = WAF2Config()
@@ -113,6 +182,13 @@ class ConfigUpdate(BaseModel):
     model: Optional[str] = None
     base_url: Optional[str] = None
     format: Optional[str] = None
+    local_first_enabled: Optional[bool] = None
+    provider_locality: Optional[str] = None
+    privacy_mode: Optional[str] = None
+    local_provider_name: Optional[str] = None
+    fail_policy: Optional[str] = None
+    llm_timeout_seconds: Optional[int] = None
+    llm_max_tokens: Optional[int] = None
     request_analysis: Optional[bool] = None
     response_analysis: Optional[bool] = None
     cache_enabled: Optional[bool] = None
@@ -127,6 +203,12 @@ class ConfigUpdate(BaseModel):
     react_rag_score_threshold: Optional[float] = None
     agent_max_iters_request: Optional[int] = None
     agent_max_iters_response: Optional[int] = None
+    local_attack_score_enabled: Optional[bool] = None
+    local_score_direct_block_enabled: Optional[bool] = None
+    local_score_block_threshold: Optional[float] = None
+    local_score_gray_threshold: Optional[float] = None
+    local_score_fast_pass_threshold: Optional[float] = None
+    local_fast_pass_enabled: Optional[bool] = None
 
 
 # ==================== 缓存机制 ====================
@@ -179,9 +261,21 @@ stats = {
     # RAG 统计
     'rag_queries': 0,
     'rag_errors': 0,
+    'rag_hits': 0,
     'rag_empty_results': 0,
     'rag_gated': 0,
+    'rag_positive_evidence': 0,
+    'rag_benign_evidence': 0,
     'rag_total_latency_ms': 0.0,
+    # Local-first / score / route 统计
+    'local_score_evaluations': 0,
+    'local_score_direct_blocks': 0,
+    'local_score_gray_zone': 0,
+    'route_static_block': 0,
+    'route_knowledge_evidence': 0,
+    'route_local_llm_one_shot': 0,
+    'route_react_deep_inspection': 0,
+    'route_fallback': 0,
     # Agent 统计
     'agent_invocations': 0,
     'agent_tool_calls': defaultdict(int),
@@ -250,6 +344,34 @@ ATTACK_CATEGORIES = {
 SEVERITY_SCORES = {'critical': 4, 'high': 3, 'medium': 2, 'low': 1, 'info': 0}
 
 # ==================== 静态规则预筛查 (层 1: 正则) ====================
+
+HARD_NEGATIVE_CONTEXT_RE = re.compile(
+    r'(?:security\s+(?:training|lesson|guide|note|education)|'
+    r'developer\s+guide|documentation|defensive|how\s+to\s+prevent|'
+    r'example\s+(?:xss|sqli|sql\s+injection|payload)|'
+    r'placeholder|user-set-value|example\s+(?:api[_-]?key|token|secret)|'
+    r'payload\s+for\s+(?:class|training)|'
+    r'discuss\s+why|escape\s+output|prepared\s+statements|'
+    r'防御|教程|教学|示例|课堂|文档|如何防止|安全培训)',
+    re.IGNORECASE,
+)
+
+HARD_NEGATIVE_PAYLOAD_RE = re.compile(
+    r'(?:<\s*script\b|javascript\s*:|on(?:load|error|click|mouseover|focus)\s*=|'
+    r'\bunion\s+select\b|\bor\s+1\s*=\s*1\b|(?:\'|")\s*--|'
+    r'(?:api[_-]?key|token|secret)["\':\s=]+["\']?(?:user-set-value|placeholder|example|xxx))',
+    re.IGNORECASE,
+)
+
+
+def _is_benign_hard_negative_context(category: str, url: str, body: str) -> bool:
+    """Identify security-training/documentation text that quotes payloads."""
+    if category not in {'none', 'unknown', 'xss', 'sql_injection', 'command_injection', 'path_traversal', 'ssrf', 'sensitive_data_exposure'}:
+        return False
+    blob = f"{url or ''}\n{body or ''}"
+    if not HARD_NEGATIVE_PAYLOAD_RE.search(blob):
+        return False
+    return bool(HARD_NEGATIVE_CONTEXT_RE.search(blob))
 
 STATIC_RULES = [
     # Path traversal
@@ -332,6 +454,8 @@ def static_rule_check(url: str, body: str) -> Optional[Dict[str, Any]]:
             text = fields_map.get(field_name, '')
             if text and rule['pattern'].search(text):
                 category = rule['category']
+                if _is_benign_hard_negative_context(category, url, body):
+                    continue
                 cat_info = ATTACK_CATEGORIES.get(category, ATTACK_CATEGORIES['unknown'])
                 return {
                     'blocked': True,
@@ -376,6 +500,8 @@ def static_keyword_prefilter(url: str, body: str) -> Optional[Dict[str, Any]]:
     for category, kws in SUSPICIOUS_KEYWORDS.items():
         for kw in kws:
             if kw.lower() in blob:
+                if _is_benign_hard_negative_context(category, url, body):
+                    continue
                 cat_info = ATTACK_CATEGORIES.get(category, ATTACK_CATEGORIES['unknown'])
                 return {
                     'blocked': True, 'direction': 'request',
@@ -551,6 +677,55 @@ def route_request(method: str, path: str, body: str, rag_used: bool, top_score: 
     }
 
 
+def _record_route_counter(route: str):
+    """Increment new route counters while preserving legacy dashboard counters."""
+    if route == ROUTE_STATIC_BLOCK:
+        stats['route_static_block'] += 1
+    elif route == ROUTE_FAST_PASS:
+        stats['route_fast_pass'] += 1
+    elif route == ROUTE_KNOWLEDGE_EVIDENCE:
+        stats['route_knowledge_evidence'] += 1
+    elif route == ROUTE_LOCAL_LLM:
+        stats['route_one_shot'] += 1
+        stats['route_local_llm_one_shot'] += 1
+    elif route == ROUTE_REACT:
+        stats['route_react'] += 1
+        stats['route_react_deep_inspection'] += 1
+    elif route == ROUTE_FALLBACK:
+        stats['route_agent_fallback'] += 1
+        stats['route_fallback'] += 1
+
+
+def _local_score_block_result(score_result: Dict[str, Any], route_info: Dict[str, Any], normalization: Dict[str, Any]) -> Dict[str, Any]:
+    category = score_result.get('top_category') or 'unknown'
+    if category not in ATTACK_CATEGORIES:
+        category = 'unknown'
+    cat_info = ATTACK_CATEGORIES.get(category, ATTACK_CATEGORIES['unknown'])
+    top_evidence = score_result.get('top_evidence') or []
+    evidence_terms = [item.get('term', '') for item in top_evidence if item.get('term')]
+    reason = f"本地攻击评分 {score_result.get('top_score', 0.0):.2f} 命中 {', '.join(evidence_terms[:4]) or '高风险指标'}"
+    return {
+        'blocked': True,
+        'direction': 'request',
+        'category': category,
+        'reason': reason,
+        'severity': cat_info['severity'],
+        'severity_score': SEVERITY_SCORES[cat_info['severity']],
+        'owasp': cat_info['owasp'],
+        'mitre': cat_info['mitre'],
+        'engine': 'local_attack_score',
+        'route': ROUTE_STATIC_BLOCK,
+        'route_reason': route_info.get('reason'),
+        'route_reasons': route_info.get('reasons', []),
+        'local_attack_score': score_result.get('summary', []),
+        'local_attack_top_category': score_result.get('top_category'),
+        'local_attack_top_score': round(float(score_result.get('top_score', 0.0)), 4),
+        'normalization': normalization.get('summary', {}),
+        'provider_locality': config.provider_locality,
+        'privacy_mode': config.privacy_mode,
+    }
+
+
 # ==================== LLM 调用 ====================
 
 def call_llm(prompt: str) -> str:
@@ -573,9 +748,9 @@ def call_llm(prompt: str) -> str:
                 json={
                     "model": config.model,
                     "messages": [{"role": "user", "content": prompt}],
-                    "max_tokens": 600,
+                    "max_tokens": config.llm_max_tokens,
                 },
-                timeout=30,
+                timeout=config.llm_timeout_seconds,
             )
             return resp.json()["content"][0]["text"].strip()
 
@@ -589,9 +764,9 @@ def call_llm(prompt: str) -> str:
                 headers=headers,
                 json={
                     "contents": [{"role": "user", "parts": [{"text": prompt}]}],
-                    "generationConfig": {"temperature": 0, "maxOutputTokens": 600},
+                    "generationConfig": {"temperature": 0, "maxOutputTokens": config.llm_max_tokens},
                 },
-                timeout=30,
+                timeout=config.llm_timeout_seconds,
             )
             return resp.json()["candidates"][0]["content"]["parts"][0]["text"].strip()
 
@@ -608,9 +783,9 @@ def call_llm(prompt: str) -> str:
                     "model": config.model,
                     "messages": [{"role": "user", "content": prompt}],
                     "temperature": 0,
-                    "max_tokens": 600,
+                    "max_tokens": config.llm_max_tokens,
                 },
-                timeout=30,
+                timeout=config.llm_timeout_seconds,
             )
             return resp.json()["choices"][0]["message"]["content"].strip()
 
@@ -622,10 +797,59 @@ def call_llm(prompt: str) -> str:
 
 # ==================== RAG 检索调度 ====================
 
+def _empty_rag_meta(outcome: str = "empty") -> Dict[str, Any]:
+    return {
+        'rag_outcome': outcome,
+        'rag_evidence_ids': [],
+        'rag_evidence_types': [],
+        'rag_evidence_categories': [],
+        'rag_evidence_sources': [],
+        'rag_positive_count': 0,
+        'rag_benign_count': 0,
+    }
+
+
+def _rag_meta_from_results(results) -> Dict[str, Any]:
+    if not results:
+        return _empty_rag_meta("empty")
+
+    evidence_ids = []
+    evidence_types = []
+    categories = []
+    sources = []
+    for idx, item in enumerate(results, start=1):
+        evidence_ids.append(getattr(item, 'evidence_id', '') or f'kb#{idx}')
+        evidence_type = (getattr(item, 'evidence_type', '') or item.metadata.get('evidence_type', 'attack') or 'attack').lower()
+        if evidence_type not in {'attack', 'benign'}:
+            evidence_type = 'attack'
+        evidence_types.append(evidence_type)
+        categories.append(getattr(item, 'category', 'unknown') or 'unknown')
+        sources.append(item.metadata.get('source', 'unknown'))
+
+    return {
+        'rag_outcome': 'hit',
+        'rag_evidence_ids': evidence_ids,
+        'rag_evidence_types': evidence_types,
+        'rag_evidence_categories': categories,
+        'rag_evidence_sources': sources,
+        'rag_positive_count': sum(1 for item in evidence_types if item == 'attack'),
+        'rag_benign_count': sum(1 for item in evidence_types if item == 'benign'),
+    }
+
+
+def _apply_rag_meta(target: Dict[str, Any], meta: Dict[str, Any]) -> None:
+    target['rag_outcome'] = meta.get('rag_outcome', 'empty')
+    target['rag_evidence_ids'] = list(meta.get('rag_evidence_ids', []))
+    target['rag_evidence_types'] = list(meta.get('rag_evidence_types', []))
+    target['rag_evidence_categories'] = list(meta.get('rag_evidence_categories', []))
+    target['rag_positive_count'] = int(meta.get('rag_positive_count', 0) or 0)
+    target['rag_benign_count'] = int(meta.get('rag_benign_count', 0) or 0)
+
+
 def _do_rag_retrieve(text: str):
-    """执行 RAG 检索, 返回 (context_str, used, top_score)。"""
+    """执行 RAG 检索, 返回 (context_str, used, top_score, meta)。"""
     if not rag_engine or not config.rag_enabled:
-        return format_retrieved_context([]), False, 0.0
+        return format_retrieved_context([]), False, 0.0, _empty_rag_meta("disabled")
 
     import time as _time
     _start = _time.perf_counter()
@@ -634,16 +858,23 @@ def _do_rag_retrieve(text: str):
     except Exception as _exc:
         stats['rag_errors'] += 1
         print(f"[WAF2] ⚠️ RAG 检索失败: {_exc}", flush=True)
-        return format_retrieved_context([]), False, 0.0
+        return format_retrieved_context([]), False, 0.0, _empty_rag_meta("error")
 
     elapsed = (_time.perf_counter() - _start) * 1000
     stats['rag_queries'] += 1
     stats['rag_total_latency_ms'] += elapsed
+    meta = _rag_meta_from_results(results)
     if not results:
         stats['rag_empty_results'] += 1
+    else:
+        stats['rag_hits'] += 1
+        if meta['rag_positive_count']:
+            stats['rag_positive_evidence'] += 1
+        if meta['rag_benign_count']:
+            stats['rag_benign_evidence'] += 1
 
     top_score = max((float(r.score) for r in results), default=0.0)
-    return format_retrieved_context(results), bool(results), top_score
+    return format_retrieved_context(results), bool(results), top_score, meta
 
 
 def _build_request_rag_input(method: str, path: str, body: str) -> str:
@@ -754,12 +985,15 @@ def _tool_rag_search(text: str) -> Dict[str, Any]:
         return {'ok': False, 'reason': 'empty input'}
     if rag_engine is None or not config.rag_enabled:
         return {'ok': False, 'reason': 'RAG engine disabled'}
-    context_str, used, top_score = _do_rag_retrieve(text[:800])
+    context_str, used, top_score, meta = _do_rag_retrieve(text[:800])
     if not used:
-        return {'ok': False, 'reason': 'no similar cases', 'top_score': round(top_score, 4)}
+        return {'ok': False, 'reason': 'no similar cases', 'top_score': round(top_score, 4), 'outcome': meta.get('rag_outcome', 'empty')}
     return {
         'ok': True,
         'top_score': round(top_score, 4),
+        'outcome': meta.get('rag_outcome', 'hit'),
+        'evidence_ids': meta.get('rag_evidence_ids', []),
+        'evidence_types': meta.get('rag_evidence_types', []),
         'context': context_str[:1500],
     }
 
@@ -878,13 +1112,15 @@ KNOWN_SECRET_PREFIXES_TABLE = """### 已知凭据前缀参考表（用于 Agent 
 REACT_REQUEST_PROMPT = """你是 WAF2 的安全分析 Agent。前置的静态规则与关键词/敏感扫描已完成，未命中；
 你的任务是对**灰色样本**（可能存在混淆、编码、上下文语义攻击、**出站凭据泄露**）做**多步推理**判定。
 
-## 历史攻击证据 (RAG 知识库检索, 按相似度降序)
+## 历史证据 (RAG 知识库检索, 按相似度降序)
 {retrieved_context}
 
 > ⚠️ 重要决策依据 ⚠️
-> 这里是从历史攻击知识库中检索出的、与当前请求形态最相似的案例。
+> 这里是从本地知识库中检索出的、与当前请求形态最相似的案例。
+> 证据行会标注 `ATTACK/<category>` 或 `BENIGN_HARD_NEGATIVE/<category>`。
 > - 如果检索到相似案例(非"无相似案例")，必须将其作为**首要决策依据**之一。
-> - 如果当前请求和参考案例形态一致(攻击类型/payload 模式相同)，必须按检索出的 category 输出 BLOCK，并在 evidence_ids 中引用对应案例 (如 ["kb#1"])。
+> - 如果当前请求和 `ATTACK` 证据形态一致(攻击类型/payload 模式相同)，必须按检索出的 category 输出 BLOCK，并在 evidence_ids 中引用对应案例 (如 ["kb#1"])。
+> - 如果当前请求和 `BENIGN_HARD_NEGATIVE` 证据形态一致，且没有独立攻击指标，应倾向 PASS；不要把良性证据当作拦截依据。
 > - 你的内部"自身判断"应作为辅助；仅当检索结果为"无相似案例"或语义冲突时，才依赖自身知识做兜底判断。
 
 {taxonomy}
@@ -913,11 +1149,11 @@ Action:
 - 拦截：{{"verdict":"BLOCK","category":"<taxonomy 中类别>","reason":"<简述证据链>","evidence_ids":["kb#1"]}}
 
 ### CoT 推理步骤（每次 final_answer 前内部完成，不要展示编号给上游）
-0. **Evidence Matching**: 先看上方"历史攻击证据"。逐条比对当前请求与每条证据，找到形态最相似的 1-2 条；记下其 [类别] 和编号。
+0. **Evidence Matching**: 先看上方"历史证据"。逐条比对当前请求与每条证据，找到形态最相似的 1-2 条；记下其证据类型、[类别] 和编号。
 1. **Definition Matching**：当前请求是否匹配某类攻击的定义？
 2. **Indicator Matching**：是否命中该类别的风险指标（至少 1 条）？
 3. **Obfuscation Check**：若表层看似正常但存在可疑编码（长 Base64、%XX 串、`\\xHH`、`\\uXXXX`），才触发解码工具；解码后若文本可疑可再用 rag_search 二次检索（如可用）。
-4. **Action**：(a) RAG 证据明显同类 → BLOCK 并填 evidence_ids；(b) 自身识别证据充分 → BLOCK；(c) 都无确证 → PASS。
+4. **Action**：(a) ATTACK 证据明显同类 → BLOCK 并填 evidence_ids；(b) BENIGN_HARD_NEGATIVE 证据明显同类且无独立攻击指标 → PASS；(c) 自身识别证据充分 → BLOCK；(d) 都无确证 → PASS。
 
 ### 少样本示例
 
@@ -986,7 +1222,7 @@ Thought:"""
 REQUEST_ONESHOT_PROMPT = """你是 WAF2 的请求安全判定器。前置静态规则、关键词层和必要的轻量解码规则已完成，未命中。
 当前请求不需要调用工具；请只做一次语义判断并输出严格 JSON。
 
-## 历史攻击证据 (RAG 知识库检索, 按相似度降序)
+## 历史证据 (RAG 知识库检索, 按相似度降序)
 {retrieved_context}
 
 {taxonomy}
@@ -1002,11 +1238,12 @@ REQUEST_ONESHOT_PROMPT = """你是 WAF2 的请求安全判定器。前置静态�
 - body(前500字): {body}
 
 ## 判定规则
-1. 当前请求如果与 RAG 证据形态一致，可以 BLOCK 并引用 evidence_ids。
-2. 没有明确攻击指标时，必须 PASS；不要因为字段名普通敏感就拦截。
-3. 请求侧 `sensitive_data_exposure` 只用于**出站外泄/攻击链**，例如把 secret 发到 webhook、外部 URL、邮件、IPFS/CDN collector、恶意 tool call。
-4. 正常业务表单里的 `password`、`pwd`、`email`、`dni`、`ntc`、支付/注册/登录字段，如果只是提交给被保护应用自身，不能按 sensitive_data_exposure 拦截。
-5. 若证据不足，不要输出 INCONCLUSIVE；输出 PASS。
+1. 当前请求如果与 `ATTACK/<category>` 证据形态一致，可以 BLOCK 并引用 evidence_ids。
+2. 当前请求如果与 `BENIGN_HARD_NEGATIVE/<category>` 证据形态一致，且没有独立攻击指标，应 PASS；不要把良性 hard-negative 证据当作拦截依据。
+3. 没有明确攻击指标时，必须 PASS；不要因为字段名普通敏感就拦截。
+4. 请求侧 `sensitive_data_exposure` 只用于**出站外泄/攻击链**，例如把 secret 发到 webhook、外部 URL、邮件、IPFS/CDN collector、恶意 tool call。
+5. 正常业务表单里的 `password`、`pwd`、`email`、`dni`、`ntc`、支付/注册/登录字段，如果只是提交给被保护应用自身，不能按 sensitive_data_exposure 拦截。
+6. 若证据不足，不要输出 INCONCLUSIVE；输出 PASS。
 
 ## 输出格式
 只输出 JSON，不要 markdown、解释、Thought 或前后缀：
@@ -1332,13 +1569,27 @@ def agent_analyze_response(status_code: int, body: str, retrieved_context: str) 
 # ==================== 调度入口 (analyze_*) ====================
 
 def analyze_request(method: str, path: str, body: str) -> Dict[str, Any]:
-    """分析请求 (静态关键词/轻量解码 → RAG → route → one-shot/ReAct, 全程缓存)"""
+    """分析请求 (normalize/decode → local score → RAG → route → one-shot/ReAct)"""
     if not config.request_analysis:
         return {'blocked': False, 'direction': 'request'}
 
+    normalization = normalize_request(method, path, body)
+    normalized_path = normalization.get('decoded', {}).get('normalized_path') or path
+    normalized_body = normalization.get('decoded', {}).get('body') or body
+    score_result = score_request(normalization) if config.local_attack_score_enabled else {
+        'scores': {}, 'evidence': {}, 'top_category': 'none', 'raw_top_category': 'none',
+        'top_score': 0.0, 'top_evidence': [], 'summary': [],
+    }
+    stats['local_score_evaluations'] += 1
+    if float(score_result.get('top_score', 0.0) or 0.0) >= config.local_score_gray_threshold:
+        stats['local_score_gray_zone'] += 1
+
     cache_dims = (
         f"rag={int(config.rag_enabled)}|scope={config.rag_scope}|model={config.model}|fmt={config.format}|"
-        f"tools=full|routing={int(config.react_routing_enabled)}|react_rag={config.react_rag_score_threshold:.2f}"
+        f"tools=full|routing={int(config.react_routing_enabled)}|react_rag={config.react_rag_score_threshold:.2f}|"
+        f"local_first={int(config.local_first_enabled)}|score={int(config.local_attack_score_enabled)}|"
+        f"block={config.local_score_block_threshold:.2f}|gray={config.local_score_gray_threshold:.2f}|"
+        f"fast={config.local_score_fast_pass_threshold:.2f}"
     )
     cache_key = f"req:{cache_dims}:{method}:{path}:{body[:200]}"
 
@@ -1348,9 +1599,52 @@ def analyze_request(method: str, path: str, body: str) -> Dict[str, Any]:
             stats['cache_hits'] += 1
             return cached
 
+    pre_route = decide_route(method, normalized_path, normalization, score_result, False, 0.0, config)
+    if pre_route.get('route') == ROUTE_STATIC_BLOCK:
+        _record_route_counter(ROUTE_STATIC_BLOCK)
+        stats['local_score_direct_blocks'] += 1
+        blocked = _local_score_block_result(score_result, pre_route, normalization)
+        if config.cache_enabled:
+            llm_cache.set(cache_key, blocked)
+        print(
+            f"[WAF2] 请求分析(local_attack_score): BLOCK "
+            f"[{blocked.get('category')}] score={blocked.get('local_attack_top_score')}"
+        )
+        return blocked
+
+    if config.local_first_enabled and pre_route.get('route') == ROUTE_FAST_PASS:
+        _record_route_counter(ROUTE_FAST_PASS)
+        fast = {
+            'blocked': False, 'direction': 'request',
+            'engine': 'route_fast_pass', 'route': ROUTE_FAST_PASS,
+            'route_reason': pre_route.get('reason'),
+            'route_reasons': pre_route.get('reasons', []),
+            'rag_augmented': False, 'rag_gated': False,
+            'rag_top_score': 0.0,
+            'local_attack_score': score_result.get('summary', []),
+            'local_attack_top_category': score_result.get('top_category'),
+            'local_attack_top_score': round(float(score_result.get('top_score', 0.0)), 4),
+            'normalization': normalization.get('summary', {}),
+            'provider_locality': config.provider_locality,
+            'privacy_mode': config.privacy_mode,
+        }
+        if config.cache_enabled:
+            llm_cache.set(cache_key, fast)
+        print("[WAF2] 请求分析(local_fast_pass): PASS")
+        return fast
+
     # 层 2: 静态关键词
-    kw_hit = static_keyword_prefilter(path, body)
+    kw_hit = static_keyword_prefilter(normalized_path, normalized_body)
     if kw_hit:
+        kw_hit['route'] = ROUTE_STATIC_BLOCK
+        kw_hit['route_reason'] = 'static keyword matched normalized request'
+        kw_hit['normalization'] = normalization.get('summary', {})
+        kw_hit['local_attack_score'] = score_result.get('summary', [])
+        kw_hit['local_attack_top_category'] = score_result.get('top_category')
+        kw_hit['local_attack_top_score'] = round(float(score_result.get('top_score', 0.0)), 4)
+        kw_hit['provider_locality'] = config.provider_locality
+        kw_hit['privacy_mode'] = config.privacy_mode
+        _record_route_counter(ROUTE_STATIC_BLOCK)
         if config.cache_enabled:
             llm_cache.set(cache_key, kw_hit)
         print(f"[WAF2] 请求分析(static_keyword): BLOCK [{kw_hit.get('category')}] {kw_hit.get('reason')}")
@@ -1358,46 +1652,143 @@ def analyze_request(method: str, path: str, body: str) -> Dict[str, Any]:
 
     decoded_hit = decoded_static_prefilter(path, body)
     if decoded_hit:
+        decoded_hit['route'] = ROUTE_STATIC_BLOCK
+        decoded_hit['route_reason'] = 'decoded static rule matched'
+        decoded_hit['normalization'] = normalization.get('summary', {})
+        decoded_hit['local_attack_score'] = score_result.get('summary', [])
+        decoded_hit['local_attack_top_category'] = score_result.get('top_category')
+        decoded_hit['local_attack_top_score'] = round(float(score_result.get('top_score', 0.0)), 4)
+        decoded_hit['provider_locality'] = config.provider_locality
+        decoded_hit['privacy_mode'] = config.privacy_mode
+        _record_route_counter(ROUTE_STATIC_BLOCK)
         if config.cache_enabled:
             llm_cache.set(cache_key, decoded_hit)
         print(f"[WAF2] 请求分析(decoded_static): BLOCK [{decoded_hit.get('category')}] {decoded_hit.get('reason')}")
         return decoded_hit
 
+    if (
+        not config.rag_enabled
+        and _is_benign_hard_negative_context(score_result.get('top_category', 'unknown'), normalized_path, normalized_body)
+        and float(score_result.get('top_score', 0.0) or 0.0) < config.local_score_block_threshold
+    ):
+        _record_route_counter(ROUTE_FAST_PASS)
+        fast = {
+            'blocked': False, 'direction': 'request',
+            'engine': 'route_fast_pass', 'route': ROUTE_FAST_PASS,
+            'rag_augmented': False, 'rag_gated': False,
+            'rag_top_score': 0.0,
+            'route_reason': 'security education hard-negative context matched while RAG is disabled',
+            'route_reasons': ['hard_negative_context', 'rag_disabled'],
+            'local_attack_score': score_result.get('summary', []),
+            'local_attack_top_category': score_result.get('top_category'),
+            'local_attack_top_score': round(float(score_result.get('top_score', 0.0)), 4),
+            'normalization': normalization.get('summary', {}),
+            'provider_locality': config.provider_locality,
+            'privacy_mode': config.privacy_mode,
+        }
+        _apply_rag_meta(fast, _empty_rag_meta("disabled"))
+        if config.cache_enabled:
+            llm_cache.set(cache_key, fast)
+        print("[WAF2] 请求分析(hard_negative_context): PASS")
+        return fast
+
     # 层 3a: RAG 检索 (头部预注入用)
-    rag_input = _build_request_rag_input(method, path, body)
-    retrieved_context, rag_used_raw, top_score = _do_rag_retrieve(rag_input)
+    rag_input = _build_request_rag_input(method, normalized_path, normalized_body)
+    retrieved_context, rag_used_raw, top_score, rag_meta = _do_rag_retrieve(rag_input)
     rag_gated = False
     if rag_used_raw and top_score < config.rag_confidence_threshold:
         rag_gated = True
         stats['rag_gated'] += 1
+        rag_meta['rag_outcome'] = 'gated'
         retrieved_context = format_retrieved_context([])
     rag_used = rag_used_raw and not rag_gated
 
-    route_info = route_request(method, path, body, rag_used, top_score)
-    route = route_info['route'] if config.react_routing_enabled else 'react'
-
-    if route == 'fast_pass':
-        stats['route_fast_pass'] += 1
+    if (
+        rag_used
+        and (rag_meta.get('rag_evidence_types') or [None])[0] == 'benign'
+        and _is_benign_hard_negative_context(score_result.get('top_category', 'unknown'), normalized_path, normalized_body)
+    ):
+        _record_route_counter(ROUTE_FAST_PASS)
         fast = {
             'blocked': False, 'direction': 'request',
-            'engine': 'route_fast_pass', 'route': 'fast_pass',
+            'engine': 'route_fast_pass', 'route': ROUTE_FAST_PASS,
+            'rag_augmented': True, 'rag_gated': False,
+            'rag_top_score': round(top_score, 4) if top_score else 0.0,
+            'route_reason': 'benign hard-negative evidence matched security education context',
+            'route_reasons': ['benign_hard_negative', f"rag_score={top_score:.3f}"],
+            'local_attack_score': score_result.get('summary', []),
+            'local_attack_top_category': score_result.get('top_category'),
+            'local_attack_top_score': round(float(score_result.get('top_score', 0.0)), 4),
+            'normalization': normalization.get('summary', {}),
+            'provider_locality': config.provider_locality,
+            'privacy_mode': config.privacy_mode,
+        }
+        _apply_rag_meta(fast, rag_meta)
+        if config.cache_enabled:
+            llm_cache.set(cache_key, fast)
+        print(f"[WAF2] 请求分析(benign_hard_negative+RAG): PASS (top_score={top_score:.3f})")
+        return fast
+
+    route_info = decide_route(method, normalized_path, normalization, score_result, rag_used, top_score, config)
+    route = route_info['route'] if config.local_first_enabled else (
+        ROUTE_REACT if config.react_routing_enabled else ROUTE_LOCAL_LLM
+    )
+
+    if route == ROUTE_STATIC_BLOCK:
+        _record_route_counter(ROUTE_STATIC_BLOCK)
+        stats['local_score_direct_blocks'] += 1
+        blocked = _local_score_block_result(score_result, route_info, normalization)
+        blocked['rag_augmented'] = rag_used
+        blocked['rag_gated'] = rag_gated
+        blocked['rag_top_score'] = round(top_score, 4) if top_score else 0.0
+        _apply_rag_meta(blocked, rag_meta)
+        if config.cache_enabled:
+            llm_cache.set(cache_key, blocked)
+        print(
+            f"[WAF2] 请求分析(local_attack_score+RAG): BLOCK "
+            f"[{blocked.get('category')}] score={blocked.get('local_attack_top_score')}"
+        )
+        return blocked
+
+    if route == ROUTE_FAST_PASS:
+        _record_route_counter(ROUTE_FAST_PASS)
+        fast = {
+            'blocked': False, 'direction': 'request',
+            'engine': 'route_fast_pass', 'route': ROUTE_FAST_PASS,
             'rag_augmented': rag_used, 'rag_gated': rag_gated,
             'rag_top_score': round(top_score, 4) if top_score else 0.0,
+            'route_reason': route_info.get('reason'),
             'route_reasons': route_info.get('reasons', []),
+            'local_attack_score': score_result.get('summary', []),
+            'local_attack_top_category': score_result.get('top_category'),
+            'local_attack_top_score': round(float(score_result.get('top_score', 0.0)), 4),
+            'normalization': normalization.get('summary', {}),
+            'provider_locality': config.provider_locality,
+            'privacy_mode': config.privacy_mode,
         }
+        _apply_rag_meta(fast, rag_meta)
         if config.cache_enabled:
             llm_cache.set(cache_key, fast)
         print(f"[WAF2] 请求分析(route_fast_pass): PASS (top_score={top_score:.3f})")
         return fast
 
-    if route == 'one_shot':
-        stats['route_one_shot'] += 1
+    if route == ROUTE_LOCAL_LLM:
+        _record_route_counter(ROUTE_LOCAL_LLM)
         stats['llm_calls'] += 1
-        one_shot_result = one_shot_analyze_request(method, path, body, retrieved_context, route_info)
+        one_shot_result = one_shot_analyze_request(method, normalized_path, normalized_body, retrieved_context, route_info)
         one_shot_result['rag_augmented'] = rag_used
         one_shot_result['rag_gated'] = rag_gated
         one_shot_result['rag_top_score'] = round(top_score, 4) if top_score else 0.0
+        _apply_rag_meta(one_shot_result, rag_meta)
+        one_shot_result['route'] = ROUTE_LOCAL_LLM
+        one_shot_result['route_reason'] = route_info.get('reason')
         one_shot_result['route_reasons'] = route_info.get('reasons', [])
+        one_shot_result['local_attack_score'] = score_result.get('summary', [])
+        one_shot_result['local_attack_top_category'] = score_result.get('top_category')
+        one_shot_result['local_attack_top_score'] = round(float(score_result.get('top_score', 0.0)), 4)
+        one_shot_result['normalization'] = normalization.get('summary', {})
+        one_shot_result['provider_locality'] = config.provider_locality
+        one_shot_result['privacy_mode'] = config.privacy_mode
         if config.cache_enabled:
             llm_cache.set(cache_key, one_shot_result)
         verdict_str = 'BLOCK' if one_shot_result.get('blocked') else 'PASS'
@@ -1408,15 +1799,23 @@ def analyze_request(method: str, path: str, body: str) -> Dict[str, Any]:
         return one_shot_result
 
     # 深层路径: ReAct Agent
-    stats['route_react'] += 1
+    _record_route_counter(ROUTE_REACT)
     stats['llm_calls'] += 1
-    agent_result = agent_analyze_request(method, path, body, retrieved_context)
+    agent_result = agent_analyze_request(method, normalized_path, normalized_body, retrieved_context)
     if agent_result is not None:
         agent_result['rag_augmented'] = rag_used
         agent_result['rag_gated'] = rag_gated
         agent_result['rag_top_score'] = round(top_score, 4) if top_score else 0.0
-        agent_result['route'] = 'react'
+        _apply_rag_meta(agent_result, rag_meta)
+        agent_result['route'] = ROUTE_REACT
+        agent_result['route_reason'] = route_info.get('reason')
         agent_result['route_reasons'] = route_info.get('reasons', [])
+        agent_result['local_attack_score'] = score_result.get('summary', [])
+        agent_result['local_attack_top_category'] = score_result.get('top_category')
+        agent_result['local_attack_top_score'] = round(float(score_result.get('top_score', 0.0)), 4)
+        agent_result['normalization'] = normalization.get('summary', {})
+        agent_result['provider_locality'] = config.provider_locality
+        agent_result['privacy_mode'] = config.privacy_mode
         if config.cache_enabled:
             llm_cache.set(cache_key, agent_result)
         verdict_str = 'BLOCK' if agent_result.get('blocked') else 'PASS'
@@ -1427,14 +1826,33 @@ def analyze_request(method: str, path: str, body: str) -> Dict[str, Any]:
         return agent_result
 
     print("[WAF2] ⚠️ Agent 请求分析失败，放行")
-    stats['route_agent_fallback'] += 1
+    _record_route_counter(ROUTE_FALLBACK)
     fail = {
         'blocked': False, 'direction': 'request', 'llm_error': True,
         'rag_augmented': rag_used, 'rag_gated': rag_gated,
         'rag_top_score': round(top_score, 4) if top_score else 0.0,
-        'route': 'react',
+        'route': ROUTE_FALLBACK,
+        'route_reason': 'ReAct failed or returned no final answer',
         'route_reasons': route_info.get('reasons', []),
+        'local_attack_score': score_result.get('summary', []),
+        'local_attack_top_category': score_result.get('top_category'),
+        'local_attack_top_score': round(float(score_result.get('top_score', 0.0)), 4),
+        'normalization': normalization.get('summary', {}),
+        'provider_locality': config.provider_locality,
+        'privacy_mode': config.privacy_mode,
     }
+    _apply_rag_meta(fail, rag_meta)
+    if config.fail_policy == "fail_closed":
+        fail.update({
+            'blocked': True,
+            'category': 'unknown',
+            'reason': '模型/Agent 分析失败且 fail_policy=fail_closed',
+            'severity': 'medium',
+            'severity_score': SEVERITY_SCORES['medium'],
+            'owasp': 'N/A',
+            'mitre': 'N/A',
+            'engine': 'fallback',
+        })
     if config.cache_enabled:
         llm_cache.set(cache_key, fail)
     return fail
@@ -1470,9 +1888,9 @@ def analyze_response(status_code: int, body: str) -> Dict[str, Any]:
 
     # 层 2a: RAG 检索 (仅 scope=all)
     if config.rag_scope == "all":
-        retrieved_context, rag_used, top_score = _do_rag_retrieve(body[:500])
+        retrieved_context, rag_used, top_score, rag_meta = _do_rag_retrieve(body[:500])
     else:
-        retrieved_context, rag_used, top_score = format_retrieved_context([]), False, 0.0
+        retrieved_context, rag_used, top_score, rag_meta = format_retrieved_context([]), False, 0.0, _empty_rag_meta("disabled")
 
     # 层 2b: ReAct Agent
     stats['llm_calls'] += 1
@@ -1480,6 +1898,7 @@ def analyze_response(status_code: int, body: str) -> Dict[str, Any]:
     if agent_result is not None:
         agent_result['rag_augmented'] = rag_used
         agent_result['rag_top_score'] = round(top_score, 4) if top_score else 0.0
+        _apply_rag_meta(agent_result, rag_meta)
         if config.cache_enabled:
             llm_cache.set(cache_key, agent_result)
         verdict_str = 'BLOCK' if agent_result.get('blocked') else 'PASS'
@@ -1488,6 +1907,7 @@ def analyze_response(status_code: int, body: str) -> Dict[str, Any]:
 
     print("[WAF2] ⚠️ Agent 响应分析失败，放行")
     fail = {'blocked': False, 'direction': 'response', 'llm_error': True, 'rag_augmented': rag_used}
+    _apply_rag_meta(fail, rag_meta)
     if config.cache_enabled:
         llm_cache.set(cache_key, fail)
     return fail
@@ -1602,6 +2022,13 @@ def _config_snapshot() -> Dict[str, Any]:
         'base_url': config.base_url,
         'format': config.format,
         'has_api_key': bool(config.api_key),
+        'local_first_enabled': config.local_first_enabled,
+        'provider_locality': config.provider_locality,
+        'privacy_mode': config.privacy_mode,
+        'local_provider_name': config.local_provider_name,
+        'fail_policy': config.fail_policy,
+        'llm_timeout_seconds': config.llm_timeout_seconds,
+        'llm_max_tokens': config.llm_max_tokens,
         'request_analysis': config.request_analysis,
         'response_analysis': config.response_analysis,
         'cache_enabled': config.cache_enabled,
@@ -1616,6 +2043,12 @@ def _config_snapshot() -> Dict[str, Any]:
         'react_rag_score_threshold': config.react_rag_score_threshold,
         'agent_max_iters_request': config.agent_max_iters_request,
         'agent_max_iters_response': config.agent_max_iters_response,
+        'local_attack_score_enabled': config.local_attack_score_enabled,
+        'local_score_direct_block_enabled': config.local_score_direct_block_enabled,
+        'local_score_block_threshold': config.local_score_block_threshold,
+        'local_score_gray_threshold': config.local_score_gray_threshold,
+        'local_score_fast_pass_threshold': config.local_score_fast_pass_threshold,
+        'local_fast_pass_enabled': config.local_fast_pass_enabled,
         'knowledge_base_size': kb_size,
         'agent_tools': list(AGENT_TOOLS.keys()),
         'edition': 'full',
@@ -1639,8 +2072,30 @@ async def update_config(update: ConfigUpdate):
         config.model = update.model
     if update.base_url is not None:
         config.base_url = update.base_url
+        if update.provider_locality is None:
+            config.provider_locality = _infer_provider_locality(config.base_url)
+        if update.local_provider_name is None:
+            config.local_provider_name = _infer_local_provider_name(config.base_url)
+        if update.privacy_mode is None:
+            config.privacy_mode = "local_only" if config.provider_locality == "local" else "online_provider"
     if update.format is not None:
         config.format = update.format
+    if update.local_first_enabled is not None:
+        config.local_first_enabled = bool(update.local_first_enabled)
+    if update.provider_locality is not None and update.provider_locality in {"local", "online", "mixed"}:
+        config.provider_locality = update.provider_locality
+        if update.privacy_mode is None:
+            config.privacy_mode = "local_only" if config.provider_locality == "local" else "online_provider"
+    if update.privacy_mode is not None:
+        config.privacy_mode = update.privacy_mode
+    if update.local_provider_name is not None:
+        config.local_provider_name = update.local_provider_name
+    if update.fail_policy is not None and update.fail_policy in {"fail_open", "fail_closed"}:
+        config.fail_policy = update.fail_policy
+    if update.llm_timeout_seconds is not None:
+        config.llm_timeout_seconds = max(5, int(update.llm_timeout_seconds))
+    if update.llm_max_tokens is not None:
+        config.llm_max_tokens = max(32, int(update.llm_max_tokens))
     if update.request_analysis is not None:
         config.request_analysis = update.request_analysis
     if update.response_analysis is not None:
@@ -1673,6 +2128,18 @@ async def update_config(update: ConfigUpdate):
         config.agent_max_iters_request = max(1, int(update.agent_max_iters_request))
     if update.agent_max_iters_response is not None:
         config.agent_max_iters_response = max(1, int(update.agent_max_iters_response))
+    if update.local_attack_score_enabled is not None:
+        config.local_attack_score_enabled = bool(update.local_attack_score_enabled)
+    if update.local_score_direct_block_enabled is not None:
+        config.local_score_direct_block_enabled = bool(update.local_score_direct_block_enabled)
+    if update.local_score_block_threshold is not None:
+        config.local_score_block_threshold = max(0.0, min(1.0, float(update.local_score_block_threshold)))
+    if update.local_score_gray_threshold is not None:
+        config.local_score_gray_threshold = max(0.0, min(1.0, float(update.local_score_gray_threshold)))
+    if update.local_score_fast_pass_threshold is not None:
+        config.local_score_fast_pass_threshold = max(0.0, min(1.0, float(update.local_score_fast_pass_threshold)))
+    if update.local_fast_pass_enabled is not None:
+        config.local_fast_pass_enabled = bool(update.local_fast_pass_enabled)
 
     snap = _config_snapshot()
     print(f"[WAF2] 配置已更新: {json.dumps({k: v for k, v in snap.items() if k != 'agent_tools'}, ensure_ascii=False)}")
@@ -1784,18 +2251,33 @@ async def get_stats():
         'avg_latency_ms': f"{stats['avg_latency_ms']:.0f}",
         'llm_errors': stats['llm_errors'],
         'llm_parse_failed': stats['llm_parse_failed'],
+        'local_first_enabled': config.local_first_enabled,
+        'provider_locality': config.provider_locality,
+        'privacy_mode': config.privacy_mode,
+        'local_provider_name': config.local_provider_name,
+        'local_score_evaluations': stats['local_score_evaluations'],
+        'local_score_direct_blocks': stats['local_score_direct_blocks'],
+        'local_score_gray_zone': stats['local_score_gray_zone'],
         'rag_queries': stats['rag_queries'],
         'rag_errors': stats['rag_errors'],
+        'rag_hits': stats['rag_hits'],
         'rag_empty_results': stats['rag_empty_results'],
         'rag_gated': stats['rag_gated'],
+        'rag_positive_evidence': stats['rag_positive_evidence'],
+        'rag_benign_evidence': stats['rag_benign_evidence'],
         'rag_avg_latency_ms': round(rag_avg, 2),
         'agent_invocations': stats['agent_invocations'],
         'agent_tool_calls': dict(stats['agent_tool_calls']),
         'agent_salvaged': stats['agent_salvaged'],
+        'route_static_block': stats['route_static_block'],
         'route_fast_pass': stats['route_fast_pass'],
         'route_one_shot': stats['route_one_shot'],
         'route_react': stats['route_react'],
         'route_agent_fallback': stats['route_agent_fallback'],
+        'route_knowledge_evidence': stats['route_knowledge_evidence'],
+        'route_local_llm_one_shot': stats['route_local_llm_one_shot'],
+        'route_react_deep_inspection': stats['route_react_deep_inspection'],
+        'route_fallback': stats['route_fallback'],
     }
 
 
@@ -1828,13 +2310,37 @@ async def get_dashboard():
             'hit_rate': f"{(stats['cache_hits'] / max(stats['llm_calls'] + stats['cache_hits'], 1) * 100):.1f}%",
             'size': len(llm_cache.cache),
         },
+        'local_first': {
+            'enabled': config.local_first_enabled,
+            'provider_locality': config.provider_locality,
+            'privacy_mode': config.privacy_mode,
+            'local_provider_name': config.local_provider_name,
+            'model': config.model,
+            'base_url': config.base_url,
+            'fail_policy': config.fail_policy,
+            'llm_timeout_seconds': config.llm_timeout_seconds,
+            'llm_max_tokens': config.llm_max_tokens,
+        },
+        'local_attack_score': {
+            'enabled': config.local_attack_score_enabled,
+            'evaluations': stats['local_score_evaluations'],
+            'direct_blocks': stats['local_score_direct_blocks'],
+            'gray_zone': stats['local_score_gray_zone'],
+            'direct_block_enabled': config.local_score_direct_block_enabled,
+            'block_threshold': config.local_score_block_threshold,
+            'gray_threshold': config.local_score_gray_threshold,
+            'fast_pass_threshold': config.local_score_fast_pass_threshold,
+        },
         'rag': {
             'enabled': config.rag_enabled and rag_engine is not None,
             'knowledge_base_size': kb_size,
             'queries': stats['rag_queries'],
             'errors': stats['rag_errors'],
+            'hits': stats['rag_hits'],
             'empty_results': stats['rag_empty_results'],
             'gated': stats['rag_gated'],
+            'positive_evidence': stats['rag_positive_evidence'],
+            'benign_evidence': stats['rag_benign_evidence'],
             'avg_latency_ms': round(rag_avg, 2),
             'scope': config.rag_scope,
         },
@@ -1847,10 +2353,15 @@ async def get_dashboard():
         'routing': {
             'enabled': config.react_routing_enabled,
             'react_rag_score_threshold': config.react_rag_score_threshold,
+            'static_block': stats['route_static_block'],
             'fast_pass': stats['route_fast_pass'],
             'one_shot': stats['route_one_shot'],
             'react': stats['route_react'],
             'agent_fallback': stats['route_agent_fallback'],
+            'knowledge_evidence': stats['route_knowledge_evidence'],
+            'local_llm_one_shot': stats['route_local_llm_one_shot'],
+            'react_deep_inspection': stats['route_react_deep_inspection'],
+            'fallback': stats['route_fallback'],
         },
         'recent_detections': stats['detections'][-10:],
     }
@@ -1879,9 +2390,20 @@ async def reset_stats():
     stats['llm_parse_failed'] = 0
     stats['rag_queries'] = 0
     stats['rag_errors'] = 0
+    stats['rag_hits'] = 0
     stats['rag_empty_results'] = 0
     stats['rag_gated'] = 0
+    stats['rag_positive_evidence'] = 0
+    stats['rag_benign_evidence'] = 0
     stats['rag_total_latency_ms'] = 0.0
+    stats['local_score_evaluations'] = 0
+    stats['local_score_direct_blocks'] = 0
+    stats['local_score_gray_zone'] = 0
+    stats['route_static_block'] = 0
+    stats['route_knowledge_evidence'] = 0
+    stats['route_local_llm_one_shot'] = 0
+    stats['route_react_deep_inspection'] = 0
+    stats['route_fallback'] = 0
     stats['agent_invocations'] = 0
     stats['agent_tool_calls'].clear()
     stats['agent_salvaged'] = 0
@@ -1901,6 +2423,12 @@ async def health_check():
         'upstream': config.upstream,
         'model': config.model,
         'has_api_key': bool(config.api_key),
+        'local_first_enabled': config.local_first_enabled,
+        'provider_locality': config.provider_locality,
+        'privacy_mode': config.privacy_mode,
+        'llm_max_tokens': config.llm_max_tokens,
+        'llm_timeout_seconds': config.llm_timeout_seconds,
+        'local_attack_score_enabled': config.local_attack_score_enabled,
         'cache_size': len(llm_cache.cache),
         'rag_loaded': rag_engine is not None,
         'agent_tools': list(AGENT_TOOLS.keys()),
@@ -1922,7 +2450,12 @@ def _apply_eval_fail_closed(result: Dict[str, Any], direction: str, hint: str) -
             'severity': 'medium',
             'severity_score': SEVERITY_SCORES['medium'],
             'owasp': 'N/A', 'mitre': 'N/A',
-            **{k: v for k, v in result.items() if k.startswith('rag_') or k in ('llm_error', 'inconclusive')},
+            **{
+                k: v for k, v in result.items()
+                if k.startswith('rag_')
+                or k.startswith('local_attack')
+                or k in ('llm_error', 'inconclusive', 'route', 'route_reason', 'route_reasons', 'normalization', 'provider_locality', 'privacy_mode')
+            },
         }
     return result
 
@@ -1980,6 +2513,11 @@ async def proxy(path: str, request: Request):
     # ========== 阶段0: 静态规则正则预筛查 ==========
     static_result = static_rule_check(full_url, body)
     if static_result:
+        _record_route_counter(ROUTE_STATIC_BLOCK)
+        static_result['route'] = ROUTE_STATIC_BLOCK
+        static_result['route_reason'] = 'static regex matched raw request'
+        static_result['provider_locality'] = config.provider_locality
+        static_result['privacy_mode'] = config.privacy_mode
         stats['blocked'] += 1
         stats['blocked_request'] += 1
         stats['by_category'][static_result.get('category', 'unknown')] += 1
@@ -2001,6 +2539,8 @@ async def proxy(path: str, request: Request):
                 'owasp': static_result.get('owasp'),
                 'mitre': static_result.get('mitre'),
                 'engine': 'static',
+                'route': static_result.get('route'),
+                'route_reason': static_result.get('route_reason'),
             }, ensure_ascii=False),
             status_code=403, media_type="application/json",
         )
@@ -2034,9 +2574,13 @@ async def proxy(path: str, request: Request):
                 'owasp': req_result.get('owasp'),
                 'mitre': req_result.get('mitre'),
                 'engine': req_result.get('engine', 'agent'),
+                'route': req_result.get('route'),
+                'route_reason': req_result.get('route_reason'),
                 'rag_augmented': bool(req_result.get('rag_augmented')),
                 'rag_top_score': req_result.get('rag_top_score', 0.0),
                 'evidence_ids': req_result.get('evidence_ids', []),
+                'local_attack_top_category': req_result.get('local_attack_top_category'),
+                'local_attack_top_score': req_result.get('local_attack_top_score'),
             }, ensure_ascii=False),
             status_code=403, media_type="application/json",
         )
@@ -2141,6 +2685,12 @@ if __name__ == "__main__":
     print(f"  上游地址: {config.upstream}")
     print(f"  LLM 模型: {config.model} (format={config.format})")
     print(f"  API Key:  {'已配置' if config.api_key else '未配置'}")
+    print(f"  Local:    first={config.local_first_enabled}, locality={config.provider_locality}, "
+          f"privacy={config.privacy_mode}, fail_policy={config.fail_policy}")
+    print(f"  LLM I/O:  timeout={config.llm_timeout_seconds}s, max_tokens={config.llm_max_tokens}")
+    print(f"  Score:    enabled={config.local_attack_score_enabled}, "
+          f"block={config.local_score_block_threshold}, gray={config.local_score_gray_threshold}, "
+          f"fast={config.local_score_fast_pass_threshold}")
     print(f"  RAG:      enabled={config.rag_enabled}, scope={config.rag_scope}, "
           f"top_k={config.rag_top_k}, threshold={config.rag_threshold}")
     print(f"  Agent:    tools={list(AGENT_TOOLS.keys())}, "
@@ -2148,7 +2698,7 @@ if __name__ == "__main__":
     print(f"  Routing:  enabled={config.react_routing_enabled}, "
           f"react_rag_score={config.react_rag_score_threshold}")
     print(f"  Eval:     mode={config.eval_mode}, fail_closed={config.eval_fail_closed}")
-    print(f"  Pipeline: STATIC_RULES → KEYWORDS → DECODED_STATIC → RAG → Router → OneShot/ReAct (request) ;"
+    print(f"  Pipeline: STATIC_RULES → Normalize/Decode → LocalScore → RAG → Router → OneShot/ReAct (request) ;"
           f" SENSITIVE → RAG(scope=all) → Agent (response)")
     print("=" * 60)
     uvicorn.run(app, host="0.0.0.0", port=8081)

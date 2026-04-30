@@ -28,9 +28,13 @@ class RetrievalResult:
     category: str
     metadata: dict[str, Any]
     score: float  # 相似度分数 (cosine similarity, 0-1, 越大越相似)
+    evidence_id: str = ""
+    evidence_type: str = "attack"
 
     def to_dict(self) -> dict[str, Any]:
         return {
+            "evidence_id": self.evidence_id,
+            "evidence_type": self.evidence_type,
             "text": self.text,
             "category": self.category,
             "metadata": dict(self.metadata),
@@ -117,12 +121,13 @@ class KnowledgeBase:
             include=["documents", "metadatas", "distances"],
         )
 
+        ids = (results.get("ids") or [[]])[0]
         docs = (results.get("documents") or [[]])[0]
         metas = (results.get("metadatas") or [[]])[0]
         distances = (results.get("distances") or [[]])[0]
 
         out: list[RetrievalResult] = []
-        for doc, meta, dist in zip(docs, metas, distances):
+        for item_id, doc, meta, dist in zip(ids, docs, metas, distances):
             # ChromaDB 默认返回 distance (cosine distance = 1 - cosine similarity)
             score = max(0.0, 1.0 - float(dist))
             if score < threshold:
@@ -130,12 +135,18 @@ class KnowledgeBase:
 
             meta = dict(meta or {})
             category = meta.pop("category", "unknown")
+            evidence_type = str(meta.get("evidence_type", "attack")).lower()
+            if evidence_type not in {"attack", "benign"}:
+                evidence_type = "attack"
+            evidence_id = str(meta.get("evidence_id") or item_id or "")
             out.append(
                 RetrievalResult(
                     text=str(doc or ""),
                     category=category,
                     metadata=meta,
                     score=score,
+                    evidence_id=evidence_id,
+                    evidence_type=evidence_type,
                 )
             )
         return out

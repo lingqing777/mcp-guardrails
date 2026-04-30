@@ -1,23 +1,25 @@
 {
   "version": "0.1.0",
-  "built_at": "2026-04-20T14:54:58Z",
-  "total_entries": 3354,
+  "built_at": "2026-04-30T11:18:32Z",
+  "total_entries": 3364,
   "by_category": {
-    "sensitive_data_exposure": 49,
+    "sensitive_data_exposure": 50,
     "authentication_bypass": 235,
-    "xss": 295,
-    "command_injection": 285,
-    "path_traversal": 693,
-    "sql_injection": 1214,
-    "prompt_injection": 211,
+    "xss": 296,
+    "command_injection": 286,
+    "path_traversal": 694,
+    "sql_injection": 1216,
+    "prompt_injection": 213,
     "data_exfiltration": 55,
-    "ssrf": 107,
-    "xxe": 210
+    "ssrf": 108,
+    "xxe": 210,
+    "insecure_deserialization": 1
   },
   "by_source": {
     "PayloadsAllTheThings": 2924,
     "OWASP-CRS": 242,
-    "AI-Agent-Attacks": 188
+    "AI-Agent-Attacks": 188,
+    "WAF2-Benign-Hard-Negatives": 10
   },
   "sources": {
     "payloadsallthethings": "3b069f03347d",

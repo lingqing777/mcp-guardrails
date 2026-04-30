@@ -18,12 +18,23 @@ function renderWaf2DecisionTags(detection) {
     const ragScore = formatScore(detection.rag_top_score);
     const evidenceIds = Array.isArray(detection.evidence_ids) ? detection.evidence_ids : [];
     const routeReasons = Array.isArray(detection.route_reasons) ? detection.route_reasons : [];
+    const routeReason = detection.route_reason;
+    const providerLocality = detection.provider_locality;
+    const privacyMode = detection.privacy_mode;
+    const localTopCategory = detection.local_attack_top_category;
+    const localTopScore = formatScore(detection.local_attack_top_score);
 
     if (engine) {
         tags.push(`<span class="tag engine">Engine: ${escapeHtml(formatLabel(engine))}</span>`);
     }
     if (route) {
         tags.push(`<span class="tag route">Route: ${escapeHtml(formatLabel(route))}</span>`);
+    }
+    if (providerLocality || privacyMode) {
+        tags.push(`<span class="tag privacy">${escapeHtml(providerLocality || 'provider')}: ${escapeHtml(privacyMode || '-')}</span>`);
+    }
+    if (localTopCategory && localTopCategory !== 'none') {
+        tags.push(`<span class="tag score">Score: ${escapeHtml(formatLabel(localTopCategory))}${localTopScore ? ` ${localTopScore}` : ''}</span>`);
     }
     if (ragAugmented) {
         tags.push(`<span class="tag rag">RAG: hit${ragScore ? ` ${ragScore}` : ''}</span>`);
@@ -36,6 +47,8 @@ function renderWaf2DecisionTags(detection) {
     if (routeReasons.length > 0) {
         const reasonText = routeReasons.slice(0, 3).join(', ');
         tags.push(`<span class="tag route-reason">Why: ${escapeHtml(reasonText)}</span>`);
+    } else if (routeReason) {
+        tags.push(`<span class="tag route-reason">Why: ${escapeHtml(routeReason)}</span>`);
     }
 
     return tags.join('');

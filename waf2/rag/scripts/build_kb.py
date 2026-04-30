@@ -33,6 +33,7 @@ if str(PROJECT_ROOT) not in sys.path:
 
 from waf2.rag.schema import KnowledgeEntry  # noqa: E402
 from waf2.rag.scripts.processors import (  # noqa: E402
+    BenignHardNegativeProcessor,
     OwaspCrsProcessor,
     PayloadsAllTheThingsProcessor,
     PromptInjectionProcessor,
@@ -42,6 +43,7 @@ from waf2.rag.scripts.processors import (  # noqa: E402
 
 RAG_DIR = PROJECT_ROOT / "waf2" / "rag"
 RAW_DIR = RAG_DIR / "data" / "raw"
+SEED_DIR = RAG_DIR / "data" / "seeds"
 PROCESSED_DIR = RAG_DIR / "data" / "processed"
 CHROMA_DIR = RAG_DIR / "data" / "chroma_db"
 MODEL_DIR = RAG_DIR / "data" / "model"
@@ -60,6 +62,7 @@ def _build_processors() -> list:
         PayloadsAllTheThingsProcessor(RAW_DIR / "payloadsallthethings"),
         OwaspCrsProcessor(RAW_DIR / "owasp-crs"),
         PromptInjectionProcessor(RAW_DIR / "prompt-injection"),
+        BenignHardNegativeProcessor(SEED_DIR / "benign_hard_negatives.jsonl"),
         # ⚠️ 已禁用 SemanticEvalProcessor: 它会把评估集 (eval/semantic_only.jsonl)
         # 注入到 KB, 而 eval_rag.py 评估时也读同一个文件 → 数据泄漏, F1 虚高。
         # 如需把语义攻击样本入 KB, 请用独立的种子文件 (不能复用评估集)。
@@ -88,7 +91,8 @@ def clean_phase() -> dict:
 
     with PAYLOADS_JSONL.open("w", encoding="utf-8") as fh:
         for entry in _iter_all_entries():
-            key = f"{entry.category}::{entry.text}"
+            evidence_type = entry.metadata.get("evidence_type", "attack")
+            key = f"{evidence_type}::{entry.category}::{entry.text}"
             if key in seen:
                 dropped += 1
                 continue
@@ -175,10 +179,12 @@ def embed_phase(stats_from_clean: dict | None = None) -> dict:
         ids = [f"entry-{i + j}" for j in range(len(batch))]
         # ChromaDB 要求 metadata 扁平化
         metadatas = []
-        for e in batch:
+        for offset, e in enumerate(batch):
             md = {"category": e.category}
             for k, v in e.metadata.items():
                 md[k] = v if isinstance(v, (str, int, float, bool)) else str(v)
+            md.setdefault("evidence_type", "attack")
+            md.setdefault("evidence_id", ids[offset])
             metadatas.append(md)
         collection.add(ids=ids, embeddings=vectors.tolist(), documents=texts, metadatas=metadatas)
         done = min(i + BATCH, total)

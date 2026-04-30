@@ -15,7 +15,9 @@
 #
 # 1. 配置 .env 文件:
 #    - TARGET_URL: 你要保护的目标应用地址
-#    - QWEN_API_KEY: LLM API 密钥 (用于 WAF2 语义分析)
+#    - LLM_BASE_URL: LLM API 地址；本地优先推荐 http://host.docker.internal:11434/v1 (Ollama)
+#    - LLM_API_KEY/QWEN_API_KEY: 在线 API 密钥；本地 Ollama/vLLM 通常可留空
+#    - PROVIDER_LOCALITY: local | online | mixed，用于 Dashboard 隐私状态展示
 #
 # 2. 启动服务:
 #    docker-compose up -d
@@ -34,8 +36,25 @@ services:
       - "${WAF2_PORT:-8081}:8081"
     environment:
       - UPSTREAM=${TARGET_URL:-http://host.docker.internal:3000}
+      # 本地优先示例:
+      #   LLM_BASE_URL=http://host.docker.internal:11434/v1
+      #   LLM_MODEL=qwen2.5:7b-instruct
+      #   LLM_API_KEY=
+      #   PROVIDER_LOCALITY=local
+      # 在线 API baseline 仍兼容:
+      #   LLM_BASE_URL=https://api.siliconflow.cn/v1
+      #   LLM_MODEL=Qwen/Qwen2.5-14B-Instruct
+      #   LLM_API_KEY=sk-...
       - QWEN_API_KEY=${QWEN_API_KEY:-}
+      - LLM_API_KEY=${LLM_API_KEY:-}
+      - LLM_BASE_URL=${LLM_BASE_URL:-https://dashscope.aliyuncs.com/compatible-mode/v1}
       - LLM_MODEL=${LLM_MODEL:-qwen-turbo}
+      - LLM_FORMAT=${LLM_FORMAT:-openai}
+      - LOCAL_FIRST_ENABLED=${LOCAL_FIRST_ENABLED:-true}
+      - PROVIDER_LOCALITY=${PROVIDER_LOCALITY:-}
+      - PRIVACY_MODE=${PRIVACY_MODE:-}
+      - LOCAL_PROVIDER_NAME=${LOCAL_PROVIDER_NAME:-}
+      - LOCAL_ATTACK_SCORE_ENABLED=${LOCAL_ATTACK_SCORE_ENABLED:-true}
       - VERIFY_SSL=${VERIFY_SSL:-true}
     extra_hosts:
       - "host.docker.internal:host-gateway"

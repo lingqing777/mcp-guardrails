@@ -154,10 +154,18 @@ def format_retrieved_context(results: list[RetrievalResult]) -> str:
         capec = r.metadata.get("capec", "N/A")
         severity = r.metadata.get("severity", "medium")
         description = r.metadata.get("description", "")
+        source = r.metadata.get("source", "unknown")
+        evidence_type = (r.evidence_type or r.metadata.get("evidence_type", "attack") or "attack").lower()
+        evidence_label = "BENIGN_HARD_NEGATIVE" if evidence_type == "benign" else "ATTACK"
+        evidence_id = r.evidence_id or f"kb#{i}"
         # 限制单条文本长度避免撑爆 prompt
         text_display = r.text[:200] + ("..." if len(r.text) > 200 else "")
 
-        header = f"{i}. [{r.category}] {text_display} ({cwe}, {capec}, severity: {severity})"
+        header = (
+            f"{i}. [{evidence_label}/{r.category}] id={evidence_id} "
+            f"score={r.score:.3f} source={source} :: {text_display} "
+            f"({cwe}, {capec}, severity: {severity})"
+        )
         lines.append(header)
         if description:
             lines.append(f"   说明: {description[:200]}")

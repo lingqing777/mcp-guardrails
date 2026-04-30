@@ -549,8 +549,18 @@
             </div>
 
             <div class="section">
-                <div class="section-title">WAF2 RAG / ReAct 管线</div>
+                <div class="section-title">WAF2 本地智能管线</div>
                 <div class="grid">
+                    <div class="card">
+                        <div class="card-title">隐私模式</div>
+                        <div class="card-value green" id="waf2-local-mode">-</div>
+                        <div class="card-subtitle" id="waf2-local-detail">provider - / model -</div>
+                    </div>
+                    <div class="card">
+                        <div class="card-title">本地评分直拦</div>
+                        <div class="card-value red" id="waf2-score-blocks">-</div>
+                        <div class="card-subtitle" id="waf2-score-detail">gray - / threshold -</div>
+                    </div>
                     <div class="card">
                         <div class="card-title">RAG 知识库</div>
                         <div class="card-value green" id="waf2-rag-state">-</div>

@@ -198,8 +198,8 @@ def _get_config(waf2_url: str):
         return json.loads(resp.read().decode("utf-8", errors="ignore"))
 
 
-def evaluate_round(waf2_url: str, attacks, normals, rag_on: bool):
-    _post_config(waf2_url, {"rag_enabled": rag_on, "eval_mode": True, "eval_fail_closed": True})
+def evaluate_round(waf2_url: str, attacks, normals, rag_on: bool, eval_fail_closed: bool = True):
+    _post_config(waf2_url, {"rag_enabled": rag_on, "eval_mode": True, "eval_fail_closed": eval_fail_closed})
     cfg = _get_config(waf2_url)
     print(
         f"[eval]   config: eval_mode={cfg.get('eval_mode')} model={cfg.get('model')} has_api_key={cfg.get('has_api_key')}"
@@ -255,8 +255,20 @@ def evaluate_round(waf2_url: str, attacks, normals, rag_on: bool):
         "llm_errors": llm_errors,
         "llm_parse_failed": int(stat.get("llm_parse_failed", 0)),
         "rag_queries": int(stat.get("rag_queries", 0)),
+        "rag_hits": int(stat.get("rag_hits", 0)),
         "rag_empty_results": int(stat.get("rag_empty_results", 0)),
         "rag_gated": int(stat.get("rag_gated", 0)),
+        "rag_positive_evidence": int(stat.get("rag_positive_evidence", 0)),
+        "rag_benign_evidence": int(stat.get("rag_benign_evidence", 0)),
+        "route_static_block": int(stat.get("route_static_block", 0)),
+        "route_fast_pass": int(stat.get("route_fast_pass", 0)),
+        "route_local_llm_one_shot": int(stat.get("route_local_llm_one_shot", stat.get("route_one_shot", 0))),
+        "route_react_deep_inspection": int(stat.get("route_react_deep_inspection", stat.get("route_react", 0))),
+        "route_fallback": int(stat.get("route_fallback", stat.get("route_agent_fallback", 0))),
+        "local_score_direct_blocks": int(stat.get("local_score_direct_blocks", 0)),
+        "local_score_gray_zone": int(stat.get("local_score_gray_zone", 0)),
+        "provider_locality": stat.get("provider_locality", "unknown"),
+        "privacy_mode": stat.get("privacy_mode", "unknown"),
         "valid_for_comparison": llm_errors == 0,
     }
 
@@ -267,15 +279,15 @@ def _sample(items, sample_n: int, rnd: random.Random):
     return items
 
 
-def evaluate_dataset(waf2_url: str, name: str, attacks, normals):
+def evaluate_dataset(waf2_url: str, name: str, attacks, normals, eval_fail_closed: bool = True):
     print(f"[eval] 样本集={name} 攻击 {len(attacks)}, 正常 {len(normals)}")
     results = {}
     for rag_on in (False, True):
         label = "RAG ON" if rag_on else "RAG OFF"
         print(f"[eval] 🚀 Round: {name} {label}")
-        r = evaluate_round(waf2_url, attacks, normals, rag_on)
+        r = evaluate_round(waf2_url, attacks, normals, rag_on, eval_fail_closed=eval_fail_closed)
         print(
-            f"[eval]   TP={r['tp']} FP={r['fp']} TN={r['tn']} FN={r['fn']} P={r['precision']:.3f} R={r['recall']:.3f} F1={r['f1']:.3f} FPR={r['fpr']:.3f} U4xx={r['upstream_4xx']} U5xx={r['upstream_5xx']} LlmErr={r['llm_errors']} ParseFail={r['llm_parse_failed']} RagQ={r['rag_queries']} RagEmpty={r['rag_empty_results']} RagGated={r['rag_gated']} Valid={r['valid_for_comparison']}"
+            f"[eval]   TP={r['tp']} FP={r['fp']} TN={r['tn']} FN={r['fn']} P={r['precision']:.3f} R={r['recall']:.3f} F1={r['f1']:.3f} FPR={r['fpr']:.3f} U4xx={r['upstream_4xx']} U5xx={r['upstream_5xx']} LlmErr={r['llm_errors']} ParseFail={r['llm_parse_failed']} RagQ={r['rag_queries']} RagHit={r['rag_hits']} RagEmpty={r['rag_empty_results']} RagGated={r['rag_gated']} RagPos={r['rag_positive_evidence']} RagBenign={r['rag_benign_evidence']} Static={r['route_static_block']} Fast={r['route_fast_pass']} LLM={r['route_local_llm_one_shot']} React={r['route_react_deep_inspection']} LocalBlock={r['local_score_direct_blocks']} Valid={r['valid_for_comparison']}"
         )
         results[label] = r
     return results
@@ -300,8 +312,16 @@ def build_report_section(name: str, off: dict, on: dict, attacks_n: int, normals
 | LLM Errors | {off['llm_errors']} | {on['llm_errors']} | {on['llm_errors'] - off['llm_errors']:+d} |
 | Parse Failed | {off['llm_parse_failed']} | {on['llm_parse_failed']} | {on['llm_parse_failed'] - off['llm_parse_failed']:+d} |
 | RAG Queries | {off['rag_queries']} | {on['rag_queries']} | {on['rag_queries'] - off['rag_queries']:+d} |
+| RAG Hits | {off['rag_hits']} | {on['rag_hits']} | {on['rag_hits'] - off['rag_hits']:+d} |
 | RAG Empty Results | {off['rag_empty_results']} | {on['rag_empty_results']} | {on['rag_empty_results'] - off['rag_empty_results']:+d} |
 | RAG Gated | {off['rag_gated']} | {on['rag_gated']} | {on['rag_gated'] - off['rag_gated']:+d} |
+| RAG Positive Evidence | {off['rag_positive_evidence']} | {on['rag_positive_evidence']} | {on['rag_positive_evidence'] - off['rag_positive_evidence']:+d} |
+| RAG Benign Evidence | {off['rag_benign_evidence']} | {on['rag_benign_evidence']} | {on['rag_benign_evidence'] - off['rag_benign_evidence']:+d} |
+| Route Static Block | {off['route_static_block']} | {on['route_static_block']} | {on['route_static_block'] - off['route_static_block']:+d} |
+| Route Fast Pass | {off['route_fast_pass']} | {on['route_fast_pass']} | {on['route_fast_pass'] - off['route_fast_pass']:+d} |
+| Route Local LLM | {off['route_local_llm_one_shot']} | {on['route_local_llm_one_shot']} | {on['route_local_llm_one_shot'] - off['route_local_llm_one_shot']:+d} |
+| Route ReAct | {off['route_react_deep_inspection']} | {on['route_react_deep_inspection']} | {on['route_react_deep_inspection'] - off['route_react_deep_inspection']:+d} |
+| Local Score Direct Blocks | {off['local_score_direct_blocks']} | {on['local_score_direct_blocks']} | {on['local_score_direct_blocks'] - off['local_score_direct_blocks']:+d} |
 """
 
 
@@ -313,6 +333,12 @@ def main():
     parser.add_argument("--dataset", choices=["csic", "smoke", "semantic", "layered"], default="csic")
     parser.add_argument("--semantic-file", default=str(EVAL_DIR / "semantic_only.jsonl"))
     parser.add_argument("--static-file", default=str(EVAL_DIR / "static_hit.jsonl"))
+    parser.add_argument(
+        "--eval-fail-closed",
+        choices=["true", "false"],
+        default="true",
+        help="Use false for deterministic no-key local pipeline checks.",
+    )
     args = parser.parse_args()
 
     EVAL_DIR.mkdir(parents=True, exist_ok=True)
@@ -329,8 +355,9 @@ def main():
         sem_attacks = _sample(sem_attacks, args.sample, rnd)
         sem_normals = _sample(sem_normals, args.sample, rnd)
 
-        static_results = evaluate_dataset(args.waf2, "static-hit", static_attacks, static_normals)
-        sem_results = evaluate_dataset(args.waf2, "semantic-only", sem_attacks, sem_normals)
+        eval_fail_closed = args.eval_fail_closed.lower() == "true"
+        static_results = evaluate_dataset(args.waf2, "static-hit", static_attacks, static_normals, eval_fail_closed=eval_fail_closed)
+        sem_results = evaluate_dataset(args.waf2, "semantic-only", sem_attacks, sem_normals, eval_fail_closed=eval_fail_closed)
 
         sections.append(build_report_section("static-hit", static_results["RAG OFF"], static_results["RAG ON"], len(static_attacks), len(static_normals)))
         sections.append(build_report_section("semantic-only", sem_results["RAG OFF"], sem_results["RAG ON"], len(sem_attacks), len(sem_normals)))
@@ -353,7 +380,7 @@ def main():
 
         attacks = _sample(attacks, args.sample, rnd)
         normals = _sample(normals, args.sample, rnd)
-        single = evaluate_dataset(args.waf2, args.dataset, attacks, normals)
+        single = evaluate_dataset(args.waf2, args.dataset, attacks, normals, eval_fail_closed=args.eval_fail_closed.lower() == "true")
         sections.append(build_report_section(args.dataset, single["RAG OFF"], single["RAG ON"], len(attacks), len(normals)))
         dataset_name = args.dataset
 

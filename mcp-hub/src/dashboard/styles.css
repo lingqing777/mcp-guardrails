@@ -599,6 +599,8 @@ body > * { position: relative; z-index: 1; }
 .tag.rag       { background: var(--color-green-dim);    color: var(--color-green); }
 .tag.rag-muted { background: var(--color-orange-dim);   color: var(--color-orange); }
 .tag.evidence  { background: var(--accent-dim);         color: var(--accent); }
+.tag.score     { background: var(--color-red-dim);      color: var(--color-red); }
+.tag.privacy   { background: var(--color-blue-dim);     color: var(--color-blue); }
 .tag.route-reason {
     max-width: 100%;
     background: var(--bg-surface-3);
