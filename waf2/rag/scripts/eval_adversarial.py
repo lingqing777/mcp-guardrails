@@ -205,12 +205,18 @@ def main():
     if only_on:
         print(f"\n⚠️  RAG 反而漏的攻击 (OFF 拦截 → ON 漏检): {sorted(only_on)}")
     if not only_off and not only_on:
-        print(f"\n📌 RAG 在该集上无差异: 两轮漏检完全一致 → KB 未覆盖该类攻击")
         common_missed = set(off["missed"]) & set(on["missed"])
         if common_missed:
-            print(f"   两轮共同漏检 ({len(common_missed)} 条, 提示 KB 该补的类型):")
+            print(f"\n📌 RAG 在该集上无差异: 两轮共同漏检 {len(common_missed)} 条")
+            print("   这说明该类样本没有被当前 pipeline 救回, 需要结合 RAG fire/route 统计判断是 KB 覆盖、路由还是前置分数问题:")
             for tag in sorted(common_missed):
                 print(f"     - {tag}")
+        elif on["rag_a"] == 0 and on["rag_b"] == 0:
+            print("\n📌 RAG 在该集上无差异: 所有样本都在 RAG 前被前置层判定")
+            print("   这组结果应视为 deterministic/local-score 回归测试通过, 不能用来证明 KB 覆盖不足或 RAG 无效。")
+        else:
+            print("\n📌 RAG 在该集上无差异: RAG 有触发但没有改变最终指标")
+            print("   需要查看 route/stats 和样本级证据, 判断 RAG 是只提供佐证还是被后续决策抵消。")
 
 
 if __name__ == "__main__":
