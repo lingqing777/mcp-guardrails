@@ -258,12 +258,13 @@ full 可能很慢，优先级低于 100 / 250 / 500。
 ```text
 1. 终端完整输出
 2. waf2/rag/eval/results.md
-3. git commit hash
-4. 模型名
-5. 本地/在线
-6. CPU / 内存 / 是否有 GPU
-7. 大致耗时
-8. 是否出现 LLM Errors / Parse Failed
+3. waf2/rag/eval/failures.jsonl
+4. git commit hash
+5. 模型名
+6. 本地/在线
+7. CPU / 内存 / 是否有 GPU
+8. 大致耗时
+9. 是否出现 LLM Errors / Parse Failed
 ```
 
 额外保存当前配置和统计:
@@ -273,7 +274,7 @@ curl -s http://localhost:8081/waf2/config > /tmp/waf2-config.json
 curl -s http://localhost:8081/waf2/stats > /tmp/waf2-stats.json
 ```
 
-把 `/tmp/waf2-config.json`、`/tmp/waf2-stats.json` 和 `results.md` 一起发回来。
+把 `/tmp/waf2-config.json`、`/tmp/waf2-stats.json`、`results.md` 和 `failures.jsonl` 一起发回来。
 
 ## 判断结果是否有效
 

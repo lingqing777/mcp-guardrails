@@ -68,6 +68,7 @@ waf2/rag/eval/csic2010/
 
 # eval_rag.py 每次跑会刷新, 不入仓库
 waf2/rag/eval/results.md
+waf2/rag/eval/failures*.jsonl
 
 # Python 虚拟环境与缓存
 waf2/rag/.venv/

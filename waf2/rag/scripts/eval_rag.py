@@ -27,6 +27,7 @@ def _resolve_eval_dir() -> Path:
 EVAL_DIR = _resolve_eval_dir()
 CSIC_DIR = EVAL_DIR / "csic2010"
 RESULTS_PATH = EVAL_DIR / "results.md"
+FAILURES_PATH = EVAL_DIR / "failures.jsonl"
 
 SMOKE_SAMPLES_ATTACK = [
     ("GET", "/vulnerable.jsp?id=1' OR 1=1--", ""),
@@ -160,10 +161,34 @@ def _send_request(waf2_url: str, method: str, path: str, body: str):
             return {"blocked": False, "status": resp.status}
     except urllib.error.HTTPError as http_err:
         if http_err.code == 403:
-            return {"blocked": True, "status": 403}
+            raw = http_err.read().decode("utf-8", errors="ignore")
+            parsed = {}
+            try:
+                parsed = json.loads(raw)
+            except Exception:
+                parsed = {}
+            return {
+                "blocked": True,
+                "status": 403,
+                "category": parsed.get("category", ""),
+                "reason": parsed.get("reason", ""),
+                "raw": raw[:500],
+            }
         return {"blocked": False, "status": http_err.code}
     except Exception:
         return {"blocked": False, "status": 0}
+
+
+def _failure_record(kind: str, method: str, path: str, body: str, result: dict) -> dict:
+    return {
+        "kind": kind,
+        "method": method,
+        "path": path,
+        "body": body,
+        "status": result.get("status", 0),
+        "category": result.get("category", ""),
+        "reason": result.get("reason", ""),
+    }
 
 
 def _post_config(waf2_url: str, payload: dict):
@@ -211,6 +236,7 @@ def evaluate_round(waf2_url: str, attacks, normals, rag_on: bool, eval_fail_clos
     tp = fn = fp = tn = 0
     upstream_4xx = 0
     upstream_5xx = 0
+    failures = []
 
     for method, path, body in attacks:
         r = _send_request(waf2_url, method, path, body)
@@ -218,6 +244,7 @@ def evaluate_round(waf2_url: str, attacks, normals, rag_on: bool, eval_fail_clos
             tp += 1
         else:
             fn += 1
+            failures.append(_failure_record("false_negative", method, path, body, r))
             if 400 <= r["status"] < 500:
                 upstream_4xx += 1
             if 500 <= r["status"] < 600:
@@ -227,6 +254,7 @@ def evaluate_round(waf2_url: str, attacks, normals, rag_on: bool, eval_fail_clos
         r = _send_request(waf2_url, method, path, body)
         if r["blocked"]:
             fp += 1
+            failures.append(_failure_record("false_positive", method, path, body, r))
         else:
             tn += 1
             if 400 <= r["status"] < 500:
@@ -270,6 +298,7 @@ def evaluate_round(waf2_url: str, attacks, normals, rag_on: bool, eval_fail_clos
         "provider_locality": stat.get("provider_locality", "unknown"),
         "privacy_mode": stat.get("privacy_mode", "unknown"),
         "valid_for_comparison": llm_errors == 0,
+        "failures": failures,
     }
 
 
@@ -295,6 +324,7 @@ def evaluate_dataset(waf2_url: str, name: str, attacks, normals, eval_fail_close
 
 def build_report_section(name: str, off: dict, on: dict, attacks_n: int, normals_n: int) -> str:
     comparability = "YES" if (off["valid_for_comparison"] and on["valid_for_comparison"]) else "NO"
+    failure_section = _build_failure_section(off, on)
     return f"""
 ## 数据集: {name}
 
@@ -307,6 +337,10 @@ def build_report_section(name: str, off: dict, on: dict, attacks_n: int, normals
 | Recall | {off['recall']:.3f} | {on['recall']:.3f} | {on['recall'] - off['recall']:+.3f} |
 | F1 | {off['f1']:.3f} | {on['f1']:.3f} | {on['f1'] - off['f1']:+.3f} |
 | FPR | {off['fpr']:.3f} | {on['fpr']:.3f} | {on['fpr'] - off['fpr']:+.3f} |
+| TP | {off['tp']} | {on['tp']} | {on['tp'] - off['tp']:+d} |
+| FP | {off['fp']} | {on['fp']} | {on['fp'] - off['fp']:+d} |
+| TN | {off['tn']} | {on['tn']} | {on['tn'] - off['tn']:+d} |
+| FN | {off['fn']} | {on['fn']} | {on['fn'] - off['fn']:+d} |
 | Upstream 4xx | {off['upstream_4xx']} | {on['upstream_4xx']} | {on['upstream_4xx'] - off['upstream_4xx']:+d} |
 | Upstream 5xx | {off['upstream_5xx']} | {on['upstream_5xx']} | {on['upstream_5xx'] - off['upstream_5xx']:+d} |
 | LLM Errors | {off['llm_errors']} | {on['llm_errors']} | {on['llm_errors'] - off['llm_errors']:+d} |
@@ -322,7 +356,55 @@ def build_report_section(name: str, off: dict, on: dict, attacks_n: int, normals
 | Route Local LLM | {off['route_local_llm_one_shot']} | {on['route_local_llm_one_shot']} | {on['route_local_llm_one_shot'] - off['route_local_llm_one_shot']:+d} |
 | Route ReAct | {off['route_react_deep_inspection']} | {on['route_react_deep_inspection']} | {on['route_react_deep_inspection'] - off['route_react_deep_inspection']:+d} |
 | Local Score Direct Blocks | {off['local_score_direct_blocks']} | {on['local_score_direct_blocks']} | {on['local_score_direct_blocks'] - off['local_score_direct_blocks']:+d} |
+
+{failure_section}
 """
+
+
+def _format_sample(item: dict) -> str:
+    body = str(item.get("body", ""))
+    body = body.replace("\n", "\\n")
+    if len(body) > 180:
+        body = body[:177] + "..."
+    path = str(item.get("path", ""))
+    if len(path) > 220:
+        path = path[:217] + "..."
+    category = item.get("category") or "-"
+    reason = item.get("reason") or "-"
+    return f"- `{item.get('kind')}` `{item.get('method')}` `{path}` status={item.get('status')} category={category} reason={reason} body=`{body}`"
+
+
+def _build_failure_section(off: dict, on: dict, limit: int = 30) -> str:
+    off_failures = off.get("failures", [])
+    on_failures = on.get("failures", [])
+    lines = [
+        "### 失败样本预览",
+        "",
+        f"- RAG OFF failures: {len(off_failures)}",
+        f"- RAG ON failures: {len(on_failures)}",
+        "",
+        "#### RAG ON top failures",
+        "",
+    ]
+    if not on_failures:
+        lines.append("无。")
+    else:
+        for item in on_failures[:limit]:
+            lines.append(_format_sample(item))
+        if len(on_failures) > limit:
+            lines.append(f"- ... 其余 {len(on_failures) - limit} 条见 `{FAILURES_PATH.name}`")
+    return "\n".join(lines)
+
+
+def _collect_failure_rows(dataset: str, results: dict) -> list[dict]:
+    rows = []
+    for label, result in results.items():
+        for item in result.get("failures", []):
+            row = dict(item)
+            row["dataset"] = dataset
+            row["round"] = label
+            rows.append(row)
+    return rows
 
 
 def main():
@@ -345,6 +427,7 @@ def main():
     rnd = random.Random(args.seed)
 
     sections = []
+    failure_rows = []
 
     if args.dataset == "layered":
         static_attacks, static_normals = load_samples_jsonl(Path(args.static_file))
@@ -361,6 +444,8 @@ def main():
 
         sections.append(build_report_section("static-hit", static_results["RAG OFF"], static_results["RAG ON"], len(static_attacks), len(static_normals)))
         sections.append(build_report_section("semantic-only", sem_results["RAG OFF"], sem_results["RAG ON"], len(sem_attacks), len(sem_normals)))
+        failure_rows.extend(_collect_failure_rows("static-hit", static_results))
+        failure_rows.extend(_collect_failure_rows("semantic-only", sem_results))
 
         dataset_name = "layered"
     else:
@@ -382,11 +467,17 @@ def main():
         normals = _sample(normals, args.sample, rnd)
         single = evaluate_dataset(args.waf2, args.dataset, attacks, normals, eval_fail_closed=args.eval_fail_closed.lower() == "true")
         sections.append(build_report_section(args.dataset, single["RAG OFF"], single["RAG ON"], len(attacks), len(normals)))
+        failure_rows.extend(_collect_failure_rows(args.dataset, single))
         dataset_name = args.dataset
 
     report = f"# RAG 效果评估报告\n\n生成时间: {time.strftime('%Y-%m-%dT%H:%M:%SZ', time.gmtime())}\nWAF2 地址: {args.waf2}\n数据集类型: {dataset_name}\n" + "\n".join(sections)
     RESULTS_PATH.write_text(report, encoding="utf-8")
     print(f"[eval] 📄 报告已写入: {RESULTS_PATH}")
+    FAILURES_PATH.write_text(
+        "\n".join(json.dumps(row, ensure_ascii=False) for row in failure_rows) + ("\n" if failure_rows else ""),
+        encoding="utf-8",
+    )
+    print(f"[eval] 📄 失败样本已写入: {FAILURES_PATH}")
 
 
 if __name__ == "__main__":
