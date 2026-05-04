@@ -114,12 +114,18 @@ def run_round(waf2_url: str, rag_on: bool, attacks, benign, label: str):
     print(f"\n【攻击 {len(attacks)} 条】")
     tp = fn = rag_a = 0
     missed = []
+    category_correct = 0
+    category_mismatches = []
     for i, (tag, m, p, b, note, gold) in enumerate(attacks, 1):
         bl, r, cat = send_one(waf2_url, m, p, b)
         rag_a += int(r)
         if bl:
             tp += 1
-            mark = "✓" if cat == gold else "?"
+            category_ok = cat == gold
+            category_correct += int(category_ok)
+            if not category_ok:
+                category_mismatches.append({"tag": tag, "expected": gold, "actual": cat or "unknown"})
+            mark = "✓" if category_ok else "?"
             print(f"  [{i:2d}] ✅ BLOCK {tag:<32s} cat={cat:<22s} {mark}  rag={r}")
         else:
             fn += 1
@@ -147,8 +153,10 @@ def run_round(waf2_url: str, rag_on: bool, attacks, benign, label: str):
     return dict(
         label=label, tp=tp, fp=fp, tn=tn, fn=fn,
         P=P, R=R, F=F, FPR=FPR,
+        category_accuracy=category_correct / max(len(attacks), 1),
         rag_a=rag_a, rag_b=rag_b,
         missed=missed, falsepos=falsepos,
+        category_mismatches=category_mismatches,
     )
 
 
@@ -188,15 +196,20 @@ def main():
     print("\n" + "=" * 70)
     print(f"{'指标':<14s} {'OFF':>10s} {'ON':>10s} {'变化':>10s}")
     print("-" * 70)
-    for k, kn in [("P", "Precision"), ("R", "Recall"), ("F", "F1"), ("FPR", "FPR")]:
+    for k, kn in [("P", "Precision"), ("R", "Recall"), ("F", "F1"), ("FPR", "FPR"), ("category_accuracy", "CategoryAcc")]:
         d = on[k] - off[k]
         s = "+" if d > 0 else ""
         print(f"{kn:<14s} {off[k]:>10.3f} {on[k]:>10.3f} {s}{d:>9.3f}")
     print("-" * 70)
     print(f"攻击拦截:     OFF {off['tp']}/{len(attacks):<3d}  ON {on['tp']}/{len(attacks):<3d}")
     print(f"误拦良性:     OFF {off['fp']}/{len(benign):<3d}  ON {on['fp']}/{len(benign):<3d}")
+    print(f"类别归因正确: OFF {round(off['category_accuracy'] * len(attacks))}/{len(attacks):<3d}  ON {round(on['category_accuracy'] * len(attacks))}/{len(attacks):<3d}")
     print(f"RAG fire 攻击:                        {on['rag_a']}/{len(attacks)} ({100*on['rag_a']/max(len(attacks),1):.0f}%)")
     print(f"RAG fire 良性:                        {on['rag_b']}/{len(benign)} ({100*on['rag_b']/max(len(benign),1):.0f}%)")
+    if on["category_mismatches"]:
+        print("\n类别归因不一致 (RAG ON):")
+        for item in on["category_mismatches"]:
+            print(f"  - {item['tag']}: expected={item['expected']} actual={item['actual']}")
 
     only_off = set(off["missed"]) - set(on["missed"])
     only_on = set(on["missed"]) - set(off["missed"])
