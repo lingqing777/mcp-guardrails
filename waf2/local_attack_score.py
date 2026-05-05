@@ -51,6 +51,7 @@ PATTERNS: Dict[str, List[Tuple[re.Pattern[str], float, str]]] = {
         (re.compile(r"/etc/(?:passwd|shadow|hosts)\b|/proc/self\b", re.I), 0.85, "unix_sensitive_file"),
         (re.compile(r"windows[\\/]system32|boot\.ini|win\.ini", re.I), 0.70, "windows_sensitive_file"),
         (re.compile(r"\.(?:env|git|ssh)(?:/|\\|\b)|wp-config\.php|id_rsa", re.I), 0.65, "sensitive_project_file"),
+        (re.compile(r"(?:^|/)[^?\s]*(?:\.(?:bak|old|backup|orig|save|tmp|swp)(?:[/?#\s]|$)|~(?:[?#\s]|$))", re.I), 0.90, "backup_or_temp_resource_probe"),
     ],
     "ssrf": [
         (re.compile(r"\b(?:127\.0\.0\.1|0\.0\.0\.0|localhost)\b", re.I), 0.70, "loopback_target"),

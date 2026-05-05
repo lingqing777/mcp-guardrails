@@ -41,6 +41,17 @@ def test_normal_business_low_score():
     assert scored["top_score"] < 0.20
 
 
+def test_backup_temp_resource_probe():
+    _, scored = _top("GET", "/tienda1/miembros/fotos.jsp.OLD", "")
+    assert scored["top_category"] == "path_traversal"
+    assert scored["top_score"] >= 0.88
+
+
+def test_normal_static_resource_low_score():
+    _, scored = _top("GET", "/tienda1/asf-logo-wide.gif", "")
+    assert scored["top_score"] < 0.20
+
+
 def test_mcp_indirect_prompt_injection():
     _, scored = _top(
         "POST",
@@ -63,6 +74,8 @@ if __name__ == "__main__":
         test_unicode_xss,
         test_nested_json_prompt_injection,
         test_normal_business_low_score,
+        test_backup_temp_resource_probe,
+        test_normal_static_resource_low_score,
         test_mcp_indirect_prompt_injection,
         test_deserialization_pickle,
     ):
