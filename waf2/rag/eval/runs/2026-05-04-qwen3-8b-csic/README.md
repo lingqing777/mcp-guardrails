@@ -2,7 +2,7 @@
 
 ## 环境
 
-- Commit: `e5f9676`
+- Commit: `78e986e` (master: `bf0f4e1`)
 - Model: `qwen3:8b` (Ollama local)
 - Base URL: `http://host.docker.internal:11434/v1`
 - Provider: local / ollama
@@ -13,14 +13,28 @@
 
 | 指标 | CSIC 100 | CSIC 250 |
 |------|----------|----------|
-| Precision | 1.000 | 1.000 |
-| Recall | 0.380 | 0.320 |
-| F1 | 0.551 | 0.485 |
-| FPR | 0.000 | 0.000 |
+| Precision (RAG OFF) | 1.000 | 1.000 |
+| Recall (RAG OFF) | 0.380 | 0.320 |
+| F1 (RAG OFF) | 0.551 | 0.485 |
+| FPR (RAG OFF) | 0.000 | 0.000 |
+| Precision (RAG ON) | 1.000 | 1.000 |
+| Recall (RAG ON) | 0.380 | 0.320 |
+| F1 (RAG ON) | 0.551 | 0.485 |
+| FPR (RAG ON) | 0.000 | 0.000 |
 | LLM Errors | 0 | 0 |
 | Valid | YES | YES |
 
 RAG ON/OFF 指标无差异。
+
+## 路由分布 (CSIC 250 RAG OFF)
+
+| 路由 | 数量 |
+|------|------|
+| Static Block | 74 |
+| Fast-pass | 209 |
+| Local LLM | 43 |
+| React | 3 |
+| Local Block | 64 |
 
 ## 主要发现
 
@@ -30,7 +44,7 @@ RAG ON/OFF 指标无差异。
 
 ## 文件
 
-- `results-csic-100.md` — CSIC 100 评测报告
-- `results-csic-250.md` — CSIC 250 评测报告
-- `failures-csic-100.jsonl` — CSIC 100 失败样本
-- `failures-csic-250.jsonl` — CSIC 250 失败样本
+- `results-csic-latest.md` — 最新评测报告（CSIC 250）
+- `failures-csic-latest.jsonl` — 最新失败样本
+- `waf2-config.json` — WAF2 运行时配置快照
+- `waf2-stats.json` — WAF2 请求统计快照
