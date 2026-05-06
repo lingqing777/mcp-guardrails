@@ -1,6 +1,6 @@
 # RAG 效果评估报告
 
-生成时间: 2026-05-06T03:36:17Z
+生成时间: 2026-05-06T15:30:09Z
 WAF2 地址: http://localhost:8081
 数据集类型: csic
 
@@ -22,17 +22,17 @@ WAF2 地址: http://localhost:8081
 | Upstream 4xx | 0 | 0 | +0 |
 | Upstream 5xx | 0 | 0 | +0 |
 | LLM Errors | 0 | 0 | +0 |
-| Parse Failed | 2 | 2 | +0 |
-| RAG Queries | 0 | 0 | +0 |
-| RAG Hits | 0 | 0 | +0 |
-| RAG Empty Results | 0 | 0 | +0 |
-| RAG Gated | 0 | 0 | +0 |
-| RAG Positive Evidence | 0 | 0 | +0 |
+| Parse Failed | 2 | 6 | +4 |
+| RAG Queries | 0 | 34 | +34 |
+| RAG Hits | 0 | 11 | +11 |
+| RAG Empty Results | 0 | 23 | +23 |
+| RAG Gated | 0 | 8 | +8 |
+| RAG Positive Evidence | 0 | 11 | +11 |
 | RAG Benign Evidence | 0 | 0 | +0 |
 | Route Static Block | 146 | 146 | +0 |
 | Route Fast Pass | 146 | 146 | +0 |
-| Route Local LLM | 31 | 31 | +0 |
-| Route ReAct | 3 | 3 | +0 |
+| Route Local LLM | 31 | 28 | -3 |
+| Route ReAct | 3 | 6 | +3 |
 | Local Score Direct Blocks | 136 | 136 | +0 |
 
 ### 失败样本预览

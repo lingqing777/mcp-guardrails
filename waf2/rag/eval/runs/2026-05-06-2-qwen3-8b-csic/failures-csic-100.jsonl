@@ -1,4 +1,4 @@
-{"kind": "false_negative", "method": "POST", "path": "/tienda1/publico/vaciar.jsp", "body": "B2=%257C", "status": 0, "category": "", "reason": "", "dataset": "csic", "round": "RAG OFF"}
+{"kind": "false_negative", "method": "POST", "path": "/tienda1/publico/vaciar.jsp", "body": "B2=%257C", "status": 200, "category": "", "reason": "", "dataset": "csic", "round": "RAG OFF"}
 {"kind": "false_negative", "method": "GET", "path": "/tienda1/publico/pagar.jsp?modo=insertar&precio=%2B&B1=Pasar+por+caja", "body": "", "status": 200, "category": "", "reason": "", "dataset": "csic", "round": "RAG OFF"}
 {"kind": "false_negative", "method": "POST", "path": "/tienda1/publico/autenticar.jsp", "body": "modo=entrar&login=je%3Fanes&pwd=arable&remember=on&B1=Entrar", "status": 200, "category": "", "reason": "", "dataset": "csic", "round": "RAG OFF"}
 {"kind": "false_negative", "method": "GET", "path": "/tienda1/publico/vaciar.jsp?B2=%257C", "body": "", "status": 200, "category": "", "reason": "", "dataset": "csic", "round": "RAG OFF"}

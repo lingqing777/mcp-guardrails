@@ -1,4 +1,4 @@
-# Eval Run: qwen3:8b + CSIC 2026-05-06 (v2)
+# Eval Run: qwen3:8b + CSIC 2026-05-06 (v2, RAG ON)
 
 ## 环境
 
@@ -6,7 +6,7 @@
 - Model: `qwen3:8b` (Ollama local)
 - Base URL: `http://host.docker.internal:11434/v1`
 - Provider: local / ollama
-- RAG: enabled (3364 entries, threshold=0.60)
+- RAG: enabled (3364 entries, threshold=0.60) — 本次 RAG 正常加载
 - 数据集: CSIC 2010
 
 ## 结果汇总
@@ -20,7 +20,16 @@
 | LLM Errors | 0 | 0 | 0 | 0 |
 | Valid | YES | YES | YES | YES |
 
-与上次 (aa8ce3e vs bf0f4e1) 对比：Recall 大幅提升 (+26pp / +24pp)。
+### RAG 统计 (CSIC 250 RAG ON)
+
+| 指标 | 值 |
+|------|-----|
+| RagQuery | 34 |
+| RagHit | 11 |
+| RagEmpty | 23 |
+| RagGated | 8 |
+| RagPositive | 11 |
+| RagBenign | 0 |
 
 ## 路由分布 (CSIC 250 RAG OFF)
 
@@ -32,11 +41,15 @@
 | React | 3 |
 | Local Block | 136 |
 
+## 与 qwen2.5:1.5b 对比
+
+qwen3:8b RAG ON 无 FP，而 qwen2.5:1.5b RAG ON 有 9 FP (FPR=0.036)。大模型在 RAG 增加上下文后更稳健。
+
 ## 主要发现
 
-1. aa8ce3e 的 endpoint parameter name mutations 效果显著，Recall 从 0.44 提升到 0.70
-2. Fast-pass 数量从 188 降至 146，更多攻击被 static block 拦截
-3. RAG ON/OFF 仍无差异，RAG 流水线位置问题未解决
+1. RAG 命中率仅 32%（11/34），知识库覆盖不足
+2. RAG 对 Recall 无提升，但 qwen3:8b 未引入误报
+3. RAG ON ParseFail 增多（2→6），ReAct 路径输出格式不稳定
 
 ## 文件
 
