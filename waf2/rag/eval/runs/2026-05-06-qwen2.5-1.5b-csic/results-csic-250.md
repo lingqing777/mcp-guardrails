@@ -1,6 +1,6 @@
 # RAG 效果评估报告
 
-生成时间: 2026-05-06T14:32:39Z
+生成时间: 2026-05-06T14:55:08Z
 WAF2 地址: http://localhost:8081
 数据集类型: csic
 
@@ -11,34 +11,34 @@ WAF2 地址: http://localhost:8081
 
 | 指标 | RAG OFF | RAG ON | 变化 |
 |------|---------|--------|------|
-| Precision | 1.000 | 1.000 | +0.000 |
+| Precision | 1.000 | 0.947 | -0.053 |
 | Recall | 0.640 | 0.640 | +0.000 |
-| F1 | 0.780 | 0.780 | +0.000 |
-| FPR | 0.000 | 0.000 | +0.000 |
+| F1 | 0.780 | 0.764 | -0.017 |
+| FPR | 0.000 | 0.036 | +0.036 |
 | TP | 160 | 160 | +0 |
-| FP | 0 | 0 | +0 |
-| TN | 250 | 250 | +0 |
+| FP | 0 | 9 | +9 |
+| TN | 250 | 241 | -9 |
 | FN | 90 | 90 | +0 |
 | Upstream 4xx | 0 | 0 | +0 |
 | Upstream 5xx | 0 | 0 | +0 |
 | LLM Errors | 0 | 0 | +0 |
 | Parse Failed | 2 | 2 | +0 |
-| RAG Queries | 0 | 0 | +0 |
-| RAG Hits | 0 | 0 | +0 |
-| RAG Empty Results | 0 | 0 | +0 |
-| RAG Gated | 0 | 0 | +0 |
-| RAG Positive Evidence | 0 | 0 | +0 |
+| RAG Queries | 0 | 34 | +34 |
+| RAG Hits | 0 | 11 | +11 |
+| RAG Empty Results | 0 | 23 | +23 |
+| RAG Gated | 0 | 8 | +8 |
+| RAG Positive Evidence | 0 | 11 | +11 |
 | RAG Benign Evidence | 0 | 0 | +0 |
 | Route Static Block | 142 | 142 | +0 |
 | Route Fast Pass | 146 | 146 | +0 |
-| Route Local LLM | 31 | 31 | +0 |
-| Route ReAct | 3 | 3 | +0 |
+| Route Local LLM | 31 | 28 | -3 |
+| Route ReAct | 3 | 6 | +3 |
 | Local Score Direct Blocks | 132 | 132 | +0 |
 
 ### 失败样本预览
 
 - RAG OFF failures: 90
-- RAG ON failures: 90
+- RAG ON failures: 99
 
 #### RAG ON top failures
 
@@ -72,4 +72,4 @@ WAF2 地址: http://localhost:8081
 - `false_negative` `GET` `/` status=200 category=- reason=- body=``
 - `false_negative` `PUT` `/tienda1/miembros/editar.jsp` status=200 category=- reason=- body=`modo=registro&login=novelia&password=gener7ble&nombre=Mahoma&apellidos=Armend%E1riz+Velichcanich&email=ku-chine%40lawn.mc&dni=09557832K&direccion=Travesia+Ramon+Ba%F1os%2C+15%2C...`
 - `false_negative` `GET` `/asf-logo-wide.gif/` status=200 category=- reason=- body=``
-- ... 其余 60 条见 `failures.jsonl`
+- ... 其余 69 条见 `failures.jsonl`

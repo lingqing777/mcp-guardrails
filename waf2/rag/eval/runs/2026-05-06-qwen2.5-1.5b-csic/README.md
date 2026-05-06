@@ -1,4 +1,4 @@
-# Eval Run: qwen2.5:1.5b + CSIC 2026-05-06
+# Eval Run: qwen2.5:1.5b + CSIC 2026-05-06 (RAG ON)
 
 ## 环境
 
@@ -6,21 +6,30 @@
 - Model: `qwen2.5:1.5b` (Ollama local)
 - Base URL: `http://host.docker.internal:11434/v1`
 - Provider: local / ollama
-- RAG: enabled (3364 entries, threshold=0.60)
+- RAG: enabled (3364 entries, threshold=0.60) — 本次 RAG 正常加载
 - 数据集: CSIC 2010
 
 ## 结果汇总
 
 | 指标 | CSIC 100 (RAG OFF) | CSIC 100 (RAG ON) | CSIC 250 (RAG OFF) | CSIC 250 (RAG ON) |
 |------|---------------------|--------------------|---------------------|--------------------|
-| Precision | 1.000 | 1.000 | 1.000 | 1.000 |
+| Precision | 1.000 | 0.972 | 1.000 | 0.947 |
 | Recall | 0.700 | 0.700 | 0.640 | 0.640 |
-| F1 | 0.824 | 0.824 | 0.780 | 0.780 |
-| FPR | 0.000 | 0.000 | 0.000 | 0.000 |
+| F1 | 0.824 | 0.814 | 0.780 | 0.764 |
+| FPR | 0.000 | 0.020 | 0.000 | 0.036 |
 | LLM Errors | 0 | 0 | 0 | 0 |
 | Valid | YES | YES | YES | YES |
 
-与 qwen3:8b (aa8ce3e) 对比：指标完全一致，1.5b 小模型表现不逊于 8b。
+### RAG 统计 (CSIC 250 RAG ON)
+
+| 指标 | 值 |
+|------|-----|
+| RagQuery | 34 |
+| RagHit | 11 |
+| RagEmpty | 23 |
+| RagGated | 8 |
+| RagPositive | 11 |
+| RagBenign | 0 |
 
 ## 路由分布 (CSIC 250 RAG OFF)
 
@@ -34,9 +43,9 @@
 
 ## 主要发现
 
-1. qwen2.5:1.5b 与 qwen3:8b 在 CSIC 上指标一致，小模型足够胜任
-2. aa8ce3e 的 endpoint parameter name mutations 是 Recall 提升的关键
-3. RAG ON/OFF 仍无差异
+1. RAG 正常工作但引入误报（FPR=0.036）
+2. RAG 命中率仅 32%（11/34），知识库覆盖不足
+3. RAG 对 Recall 无提升，仅增加 FP
 
 ## 文件
 

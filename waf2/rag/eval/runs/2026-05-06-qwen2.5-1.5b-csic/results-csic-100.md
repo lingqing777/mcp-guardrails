@@ -1,6 +1,6 @@
 # RAG 效果评估报告
 
-生成时间: 2026-05-06T14:30:55Z
+生成时间: 2026-05-06T14:53:28Z
 WAF2 地址: http://localhost:8081
 数据集类型: csic
 
@@ -11,34 +11,34 @@ WAF2 地址: http://localhost:8081
 
 | 指标 | RAG OFF | RAG ON | 变化 |
 |------|---------|--------|------|
-| Precision | 1.000 | 1.000 | +0.000 |
+| Precision | 1.000 | 0.972 | -0.028 |
 | Recall | 0.700 | 0.700 | +0.000 |
-| F1 | 0.824 | 0.824 | +0.000 |
-| FPR | 0.000 | 0.000 | +0.000 |
+| F1 | 0.824 | 0.814 | -0.010 |
+| FPR | 0.000 | 0.020 | +0.020 |
 | TP | 70 | 70 | +0 |
-| FP | 0 | 0 | +0 |
-| TN | 100 | 100 | +0 |
+| FP | 0 | 2 | +2 |
+| TN | 100 | 98 | -2 |
 | FN | 30 | 30 | +0 |
 | Upstream 4xx | 0 | 0 | +0 |
 | Upstream 5xx | 0 | 0 | +0 |
 | LLM Errors | 0 | 0 | +0 |
 | Parse Failed | 0 | 0 | +0 |
-| RAG Queries | 0 | 0 | +0 |
-| RAG Hits | 0 | 0 | +0 |
-| RAG Empty Results | 0 | 0 | +0 |
-| RAG Gated | 0 | 0 | +0 |
-| RAG Positive Evidence | 0 | 0 | +0 |
+| RAG Queries | 0 | 10 | +10 |
+| RAG Hits | 0 | 6 | +6 |
+| RAG Empty Results | 0 | 4 | +4 |
+| RAG Gated | 0 | 4 | +4 |
+| RAG Positive Evidence | 0 | 6 | +6 |
 | RAG Benign Evidence | 0 | 0 | +0 |
 | Route Static Block | 63 | 63 | +0 |
 | Route Fast Pass | 69 | 69 | +0 |
-| Route Local LLM | 9 | 9 | +0 |
-| Route ReAct | 1 | 1 | +0 |
+| Route Local LLM | 9 | 7 | -2 |
+| Route ReAct | 1 | 3 | +2 |
 | Local Score Direct Blocks | 59 | 59 | +0 |
 
 ### 失败样本预览
 
 - RAG OFF failures: 30
-- RAG ON failures: 30
+- RAG ON failures: 32
 
 #### RAG ON top failures
 
@@ -72,3 +72,4 @@ WAF2 地址: http://localhost:8081
 - `false_negative` `GET` `/` status=200 category=- reason=- body=``
 - `false_negative` `PUT` `/tienda1/miembros/editar.jsp` status=200 category=- reason=- body=`modo=registro&login=novelia&password=gener7ble&nombre=Mahoma&apellidos=Armend%E1riz+Velichcanich&email=ku-chine%40lawn.mc&dni=09557832K&direccion=Travesia+Ramon+Ba%F1os%2C+15%2C...`
 - `false_negative` `GET` `/asf-logo-wide.gif/` status=200 category=- reason=- body=``
+- ... 其余 2 条见 `failures.jsonl`
