@@ -52,6 +52,24 @@ def test_normal_static_resource_low_score():
     assert scored["top_score"] < 0.20
 
 
+def test_endpoint_param_name_mutation_body():
+    _, scored = _top("POST", "/tienda1/publico/autenticar.jsp", "modoA=entrar&login=demo&pwd=secret&B1=Entrar")
+    assert scored["top_category"] == "unknown"
+    assert scored["top_score"] >= 0.88
+    assert any(item["term"] == "endpoint_param_name_mutation" for item in scored["top_evidence"])
+
+
+def test_endpoint_param_name_mutation_query():
+    _, scored = _top("GET", "/tienda1/publico/anadir.jsp?id=2&nombreA=Vino&precio=39&cantidad=1&B1=Anadir", "")
+    assert scored["top_category"] == "unknown"
+    assert scored["top_score"] >= 0.88
+
+
+def test_normal_tienda_business_params_low_score():
+    _, scored = _top("POST", "/tienda1/publico/anadir.jsp", "id=2&nombre=Vino&precio=39&cantidad=1&B1=Anadir")
+    assert scored["top_score"] < 0.20
+
+
 def test_mcp_indirect_prompt_injection():
     _, scored = _top(
         "POST",
@@ -76,6 +94,9 @@ if __name__ == "__main__":
         test_normal_business_low_score,
         test_backup_temp_resource_probe,
         test_normal_static_resource_low_score,
+        test_endpoint_param_name_mutation_body,
+        test_endpoint_param_name_mutation_query,
+        test_normal_tienda_business_params_low_score,
         test_mcp_indirect_prompt_injection,
         test_deserialization_pickle,
     ):

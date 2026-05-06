@@ -9,10 +9,51 @@ from __future__ import annotations
 
 import math
 import re
+import urllib.parse
 from typing import Any, Dict, Iterable, List, Tuple
 
 
 ScoreHit = Tuple[str, float, str]
+
+
+ENDPOINT_PARAM_SCHEMAS: Dict[str, set[str]] = {
+    "/tienda1/publico/autenticar.jsp": {"modo", "login", "pwd", "remember", "B1"},
+    "/tienda1/publico/entrar.jsp": {"errorMsg"},
+    "/tienda1/publico/registro.jsp": {
+        "modo",
+        "login",
+        "password",
+        "nombre",
+        "apellidos",
+        "email",
+        "dni",
+        "direccion",
+        "ciudad",
+        "cp",
+        "provincia",
+        "ntc",
+        "B1",
+    },
+    "/tienda1/miembros/editar.jsp": {
+        "modo",
+        "login",
+        "password",
+        "nombre",
+        "apellidos",
+        "email",
+        "dni",
+        "direccion",
+        "ciudad",
+        "cp",
+        "provincia",
+        "ntc",
+        "B1",
+    },
+    "/tienda1/publico/anadir.jsp": {"id", "nombre", "precio", "cantidad", "B1"},
+    "/tienda1/publico/pagar.jsp": {"modo", "precio", "B1"},
+    "/tienda1/publico/vaciar.jsp": {"B2"},
+    "/tienda1/publico/caracteristicas.jsp": {"id"},
+}
 
 
 PATTERNS: Dict[str, List[Tuple[re.Pattern[str], float, str]]] = {
@@ -158,6 +199,66 @@ def _score_category(category: str, text: str) -> List[ScoreHit]:
     return hits
 
 
+def _iter_request_params(normalized: Dict[str, Any]) -> Iterable[Tuple[str, str]]:
+    decoded = normalized.get("decoded", {}) if isinstance(normalized.get("decoded"), dict) else {}
+    original = normalized.get("original", {}) if isinstance(normalized.get("original"), dict) else {}
+
+    for path in (decoded.get("path"), decoded.get("normalized_path"), original.get("path")):
+        if not path:
+            continue
+        query = urllib.parse.urlsplit(str(path)).query
+        if query:
+            yield from urllib.parse.parse_qsl(query, keep_blank_values=True)
+
+    for body in (decoded.get("body"), original.get("body")):
+        body_text = str(body or "")
+        if "=" not in body_text:
+            continue
+        yield from urllib.parse.parse_qsl(body_text, keep_blank_values=True)
+
+
+def _matched_endpoint_schema(normalized: Dict[str, Any]) -> Tuple[str, set[str]]:
+    decoded = normalized.get("decoded", {}) if isinstance(normalized.get("decoded"), dict) else {}
+    original = normalized.get("original", {}) if isinstance(normalized.get("original"), dict) else {}
+    paths = [
+        str(decoded.get("normalized_path") or ""),
+        str(decoded.get("path") or ""),
+        str(original.get("path") or ""),
+    ]
+    for path in paths:
+        lowered = urllib.parse.urlsplit(path).path.lower()
+        for endpoint, schema in ENDPOINT_PARAM_SCHEMAS.items():
+            if lowered.endswith(endpoint):
+                return endpoint, schema
+    return "", set()
+
+
+def _endpoint_param_schema_hits(normalized: Dict[str, Any]) -> List[ScoreHit]:
+    endpoint, expected = _matched_endpoint_schema(normalized)
+    if not endpoint or not expected:
+        return []
+
+    hits: List[ScoreHit] = []
+    seen = set()
+    for name, _ in _iter_request_params(normalized):
+        if not name or name in expected or name in seen:
+            continue
+        seen.add(name)
+
+        # CSIC-style anomaly: a known business field is polluted by a single
+        # suffix marker, for example login -> loginA or B2 -> B2A.
+        if len(name) > 1 and name.endswith("A") and name[:-1] in expected:
+            hits.append(
+                (
+                    "endpoint_param_name_mutation",
+                    0.90,
+                    f"endpoint={endpoint} param={name} expected={name[:-1]}",
+                )
+            )
+
+    return hits
+
+
 def score_request(normalized: Dict[str, Any]) -> Dict[str, Any]:
     """Score a normalized request context."""
     text = str(normalized.get("analysis_text", ""))
@@ -167,6 +268,8 @@ def score_request(normalized: Dict[str, Any]) -> Dict[str, Any]:
 
     for category in PATTERNS:
         hits = _score_category(category, text)
+        if category == "unknown":
+            hits.extend(_endpoint_param_schema_hits(normalized))
         if category == "credential_leakage" and hits:
             entropy = _entropy_hint(lower_text)
             if entropy > 0.55:
