@@ -6,6 +6,17 @@ Run with:
 
 from normalization import normalize_request
 from local_attack_score import score_request
+from risk_router import ROUTE_FAST_PASS, ROUTE_REACT, ROUTE_STATIC_BLOCK, decide_route
+
+
+class _Config:
+    local_score_block_threshold = 0.88
+    local_score_gray_threshold = 0.35
+    local_score_fast_pass_threshold = 0.12
+    local_score_direct_block_enabled = True
+    local_fast_pass_enabled = True
+    react_routing_enabled = True
+    react_rag_score_threshold = 0.68
 
 
 def _top(method: str, path: str, body: str):
@@ -70,6 +81,28 @@ def test_normal_tienda_business_params_low_score():
     assert scored["top_score"] < 0.20
 
 
+def test_low_risk_business_rag_hit_stays_fast_pass():
+    normalized, scored = _top("POST", "/tienda1/publico/caracteristicas.jsp", "id=1")
+    route = decide_route("POST", "/tienda1/publico/caracteristicas.jsp", normalized, scored, True, 0.72, _Config())
+    assert scored["top_score"] < 0.20
+    assert route["route"] == ROUTE_FAST_PASS
+    assert "rag_ignored_for_low_risk_business" in route["reasons"]
+
+
+def test_endpoint_param_mutation_still_direct_blocks():
+    normalized, scored = _top("POST", "/tienda1/publico/caracteristicas.jsp", "idA=1")
+    route = decide_route("POST", "/tienda1/publico/caracteristicas.jsp", normalized, scored, True, 0.72, _Config())
+    assert scored["top_score"] >= 0.88
+    assert route["route"] == ROUTE_STATIC_BLOCK
+
+
+def test_encoded_unknown_rag_hit_can_still_enter_react():
+    normalized, scored = _top("GET", "/unknown?note=hello%20world", "")
+    route = decide_route("GET", "/unknown?note=hello%20world", normalized, scored, True, 0.72, _Config())
+    assert scored["top_score"] < 0.20
+    assert route["route"] == ROUTE_REACT
+
+
 def test_mcp_indirect_prompt_injection():
     _, scored = _top(
         "POST",
@@ -97,6 +130,9 @@ if __name__ == "__main__":
         test_endpoint_param_name_mutation_body,
         test_endpoint_param_name_mutation_query,
         test_normal_tienda_business_params_low_score,
+        test_low_risk_business_rag_hit_stays_fast_pass,
+        test_endpoint_param_mutation_still_direct_blocks,
+        test_encoded_unknown_rag_hit_can_still_enter_react,
         test_mcp_indirect_prompt_injection,
         test_deserialization_pickle,
     ):

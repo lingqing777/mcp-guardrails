@@ -51,6 +51,7 @@ BUSINESS_BODY_TERMS = (
     "post_id",
     "theme",
     "locale",
+    "id",
     "precio",
     "cantidad",
     "carrito",
@@ -124,8 +125,22 @@ def decide_route(
     high_rag = bool(rag_used and top_score >= react_rag_threshold)
     mcp_or_prompt = category in {"prompt_injection", "data_exfiltration", "sensitive_data_exposure"}
     business_context = _business_context(path, normalized)
+    low_risk_business_context = bool(business_context and score_value < gray_threshold)
 
-    if bool(getattr(config, "react_routing_enabled", True)) and not (business_context and score_value < gray_threshold) and (
+    if fast_pass_enabled and low_risk_business_context:
+        route_reasons = [*reasons, "business_context"]
+        if rag_used:
+            route_reasons.append("rag_ignored_for_low_risk_business")
+        return {
+            "route": ROUTE_FAST_PASS,
+            "legacy_route": "fast_pass",
+            "reason": "low-risk known business context",
+            "reasons": route_reasons,
+            "category": category,
+            "score": score_value,
+        }
+
+    if bool(getattr(config, "react_routing_enabled", True)) and (
         encoded_gray
         or high_rag
         or (mcp_or_prompt and score_value >= gray_threshold)
@@ -151,16 +166,6 @@ def decide_route(
 
     method_upper = (method or "GET").upper()
     changed = bool(summary.get("changed") or signals.get("changed"))
-    if fast_pass_enabled and business_context and score_value < gray_threshold:
-        return {
-            "route": ROUTE_FAST_PASS,
-            "legacy_route": "fast_pass",
-            "reason": "low-risk known business context",
-            "reasons": [*reasons, "business_context"],
-            "category": category,
-            "score": score_value,
-        }
-
     if fast_pass_enabled and score_value <= fast_threshold and not changed and method_upper in {"GET", "HEAD", "OPTIONS"}:
         return {
             "route": ROUTE_FAST_PASS,
