@@ -55,6 +55,9 @@ ENDPOINT_PARAM_SCHEMAS: Dict[str, set[str]] = {
     "/tienda1/publico/caracteristicas.jsp": {"id"},
 }
 
+NUMERIC_PARAM_NAMES = {"id", "precio", "cantidad"}
+WORKFLOW_ACTION_PARAM_NAMES = {"B1", "B2"}
+
 
 PATTERNS: Dict[str, List[Tuple[re.Pattern[str], float, str]]] = {
     "sql_injection": [
@@ -259,6 +262,52 @@ def _endpoint_param_schema_hits(normalized: Dict[str, Any]) -> List[ScoreHit]:
     return hits
 
 
+def _endpoint_param_value_hits(normalized: Dict[str, Any]) -> List[ScoreHit]:
+    endpoint, expected = _matched_endpoint_schema(normalized)
+    if not endpoint or not expected:
+        return []
+
+    hits: List[ScoreHit] = []
+    seen = set()
+    emitted = set()
+    for name, value in _iter_request_params(normalized):
+        if not name or name not in expected:
+            continue
+        key = (name, value)
+        if key in seen:
+            continue
+        seen.add(key)
+
+        raw_value = str(value or "")
+        if name in NUMERIC_PARAM_NAMES:
+            numeric_ok = bool(re.fullmatch(r"\d+(?:[.,]\d{1,2})?", raw_value))
+            term = "endpoint_numeric_param_value_anomaly"
+            if raw_value and not numeric_ok and (term, name) not in emitted:
+                emitted.add((term, name))
+                hits.append(
+                    (
+                        term,
+                        0.90,
+                        f"endpoint={endpoint} param={name} value={raw_value[:40]}",
+                    )
+                )
+
+        if name in WORKFLOW_ACTION_PARAM_NAMES and re.search(r"['\"|?%/]", raw_value):
+            term = "endpoint_workflow_param_value_anomaly"
+            if (term, name) in emitted:
+                continue
+            emitted.add((term, name))
+            hits.append(
+                (
+                    term,
+                    0.90,
+                    f"endpoint={endpoint} param={name} value={raw_value[:40]}",
+                )
+            )
+
+    return hits
+
+
 def score_request(normalized: Dict[str, Any]) -> Dict[str, Any]:
     """Score a normalized request context."""
     text = str(normalized.get("analysis_text", ""))
@@ -270,6 +319,7 @@ def score_request(normalized: Dict[str, Any]) -> Dict[str, Any]:
         hits = _score_category(category, text)
         if category == "unknown":
             hits.extend(_endpoint_param_schema_hits(normalized))
+            hits.extend(_endpoint_param_value_hits(normalized))
         if category == "credential_leakage" and hits:
             entropy = _entropy_hint(lower_text)
             if entropy > 0.55:

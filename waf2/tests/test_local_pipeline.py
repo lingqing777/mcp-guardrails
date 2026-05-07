@@ -81,6 +81,25 @@ def test_normal_tienda_business_params_low_score():
     assert scored["top_score"] < 0.20
 
 
+def test_numeric_param_value_pollution():
+    _, scored = _top("GET", "/tienda1/publico/pagar.jsp?modo=insertar&precio=%2B&B1=Pasar+por+caja", "")
+    assert scored["top_category"] == "unknown"
+    assert scored["top_score"] >= 0.88
+    assert any(item["term"] == "endpoint_numeric_param_value_anomaly" for item in scored["top_evidence"])
+
+
+def test_workflow_param_value_pollution():
+    _, scored = _top("POST", "/tienda1/publico/vaciar.jsp", "B2=%257C")
+    assert scored["top_category"] == "unknown"
+    assert scored["top_score"] >= 0.88
+    assert any(item["term"] == "endpoint_workflow_param_value_anomaly" for item in scored["top_evidence"])
+
+
+def test_normal_tienda_workflow_value_low_score():
+    _, scored = _top("GET", "/tienda1/publico/pagar.jsp?modo=insertar&precio=2373&B1=Pasar+por+caja", "")
+    assert scored["top_score"] < 0.20
+
+
 def test_low_risk_business_rag_hit_stays_fast_pass():
     normalized, scored = _top("POST", "/tienda1/publico/caracteristicas.jsp", "id=1")
     route = decide_route("POST", "/tienda1/publico/caracteristicas.jsp", normalized, scored, True, 0.72, _Config())
@@ -130,6 +149,9 @@ if __name__ == "__main__":
         test_endpoint_param_name_mutation_body,
         test_endpoint_param_name_mutation_query,
         test_normal_tienda_business_params_low_score,
+        test_numeric_param_value_pollution,
+        test_workflow_param_value_pollution,
+        test_normal_tienda_workflow_value_low_score,
         test_low_risk_business_rag_hit_stays_fast_pass,
         test_endpoint_param_mutation_still_direct_blocks,
         test_encoded_unknown_rag_hit_can_still_enter_react,
