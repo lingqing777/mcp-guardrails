@@ -100,6 +100,34 @@ def test_normal_tienda_workflow_value_low_score():
     assert scored["top_score"] < 0.20
 
 
+def test_endpoint_method_anomaly():
+    _, scored = _top("PUT", "/tienda1/miembros/editar.jsp", "modo=registro&login=novelia")
+    assert scored["top_category"] == "unknown"
+    assert scored["top_score"] >= 0.88
+    assert any(item["term"] == "endpoint_method_anomaly" for item in scored["top_evidence"])
+
+
+def test_extension_confusion_suffix():
+    _, scored = _top("GET", "/tienda1/publico/registro.jsp.java", "")
+    assert scored["top_category"] == "unknown"
+    assert scored["top_score"] >= 0.88
+    assert any(item["term"] == "extension_confusion_suffix" for item in scored["top_evidence"])
+
+
+def test_admin_or_example_probe_path():
+    _, scored = _top("GET", "/admin/login.do", "")
+    assert scored["top_category"] == "unknown"
+    assert scored["top_score"] >= 0.88
+    assert any(item["term"] == "admin_or_example_app_probe" for item in scored["top_evidence"])
+
+
+def test_static_resource_trailing_slash_probe():
+    _, scored = _top("GET", "/asf-logo-wide.gif/", "")
+    assert scored["top_category"] == "unknown"
+    assert scored["top_score"] >= 0.88
+    assert any(item["term"] == "static_resource_trailing_slash_probe" for item in scored["top_evidence"])
+
+
 def test_low_risk_business_rag_hit_stays_fast_pass():
     normalized, scored = _top("POST", "/tienda1/publico/caracteristicas.jsp", "id=1")
     route = decide_route("POST", "/tienda1/publico/caracteristicas.jsp", normalized, scored, True, 0.72, _Config())
@@ -152,6 +180,10 @@ if __name__ == "__main__":
         test_numeric_param_value_pollution,
         test_workflow_param_value_pollution,
         test_normal_tienda_workflow_value_low_score,
+        test_endpoint_method_anomaly,
+        test_extension_confusion_suffix,
+        test_admin_or_example_probe_path,
+        test_static_resource_trailing_slash_probe,
         test_low_risk_business_rag_hit_stays_fast_pass,
         test_endpoint_param_mutation_still_direct_blocks,
         test_encoded_unknown_rag_hit_can_still_enter_react,

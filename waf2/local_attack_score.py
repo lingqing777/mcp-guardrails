@@ -155,8 +155,11 @@ PATTERNS: Dict[str, List[Tuple[re.Pattern[str], float, str]]] = {
         (re.compile(r"set-cookie\s*:\s*tamper", re.I), 0.90, "response_splitting_tamper_cookie"),
         (re.compile(r"/CFIDE/administrator", re.I), 0.90, "known_admin_probe_path"),
         (re.compile(r"\.(?:jsp|gif|css)/\d{8,}\.(?:jsp|java|cfm)\b", re.I), 0.90, "extension_confusion_probe"),
+        (re.compile(r"\.(?:jsp|gif|jpg|jpeg|png|css|js)\.(?:java|jsp|cfm|inc)(?:$|[/?#\s])", re.I), 0.90, "extension_confusion_suffix"),
+        (re.compile(r"(?:^|/)(?:admin|administrator)/[^?\s]*|/examplesWebApp/(?:SessionServlet|index\.jsp)?", re.I), 0.90, "admin_or_example_app_probe"),
         (re.compile(r"/examplesWebApp/index\.jsp\b", re.I), 0.90, "csic_probe_app_path"),
         (re.compile(r"\.(?:gif|jpg|jpeg|png|css|js)/\d{8,}\b", re.I), 0.90, "static_resource_numeric_suffix"),
+        (re.compile(r"\.(?:gif|jpg|jpeg|png|css|js)/(?:$|[?#\s])", re.I), 0.90, "static_resource_trailing_slash_probe"),
         (re.compile(r"(?:[?&]|^)(?:idA|precioA|errorMsgA|B2A)=", re.I), 0.90, "csic_mutated_business_param"),
         (re.compile(r"(?:[?&]|^)(?:modo|B1)=(?:%7c|\|)", re.I), 0.90, "csic_control_char_param"),
         (re.compile(r"%25(?:3f|3F)|%253[fF]", re.I), 0.90, "double_encoded_question_mark"),
@@ -308,6 +311,22 @@ def _endpoint_param_value_hits(normalized: Dict[str, Any]) -> List[ScoreHit]:
     return hits
 
 
+def _endpoint_method_hits(normalized: Dict[str, Any]) -> List[ScoreHit]:
+    endpoint, _ = _matched_endpoint_schema(normalized)
+    if not endpoint:
+        return []
+    method = str(normalized.get("method") or "GET").upper()
+    if method in {"GET", "POST", "HEAD", "OPTIONS"}:
+        return []
+    return [
+        (
+            "endpoint_method_anomaly",
+            0.90,
+            f"endpoint={endpoint} method={method}",
+        )
+    ]
+
+
 def score_request(normalized: Dict[str, Any]) -> Dict[str, Any]:
     """Score a normalized request context."""
     text = str(normalized.get("analysis_text", ""))
@@ -320,6 +339,7 @@ def score_request(normalized: Dict[str, Any]) -> Dict[str, Any]:
         if category == "unknown":
             hits.extend(_endpoint_param_schema_hits(normalized))
             hits.extend(_endpoint_param_value_hits(normalized))
+            hits.extend(_endpoint_method_hits(normalized))
         if category == "credential_leakage" and hits:
             entropy = _entropy_hint(lower_text)
             if entropy > 0.55:
