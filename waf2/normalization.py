@@ -70,6 +70,24 @@ def _url_decode_layers(text: str, layers: int = 2) -> Tuple[str, List[str]]:
     return current, methods
 
 
+def double_url_decode(text: str) -> str:
+    """Apply URL decoding up to two times. Public helper for downstream scorers.
+
+    Stops early when a decode pass yields no change. Always returns a string.
+    """
+    decoded, _ = _url_decode_layers(text or "", layers=2)
+    return decoded
+
+
+def has_residual_percent(text: str) -> bool:
+    """True when the input still contains a `%XX` percent-encoded sequence.
+
+    Use after `double_url_decode` to detect inputs that intentionally bury
+    encoded payloads three or more layers deep.
+    """
+    return bool(PERCENT_ENC_RE.search(text or ""))
+
+
 def _decode_unicode_escapes(text: str) -> Tuple[str, bool]:
     if not text or not UNICODE_ESCAPE_RE.search(text):
         return text or "", False

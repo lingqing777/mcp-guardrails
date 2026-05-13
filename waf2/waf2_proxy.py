@@ -1568,7 +1568,12 @@ def agent_analyze_response(status_code: int, body: str, retrieved_context: str) 
 
 # ==================== 调度入口 (analyze_*) ====================
 
-def analyze_request(method: str, path: str, body: str) -> Dict[str, Any]:
+def analyze_request(
+    method: str,
+    path: str,
+    body: str,
+    headers: Optional[Dict[str, str]] = None,
+) -> Dict[str, Any]:
     """分析请求 (normalize/decode → local score → RAG → route → one-shot/ReAct)"""
     if not config.request_analysis:
         return {'blocked': False, 'direction': 'request'}
@@ -1576,7 +1581,7 @@ def analyze_request(method: str, path: str, body: str) -> Dict[str, Any]:
     normalization = normalize_request(method, path, body)
     normalized_path = normalization.get('decoded', {}).get('normalized_path') or path
     normalized_body = normalization.get('decoded', {}).get('body') or body
-    score_result = score_request(normalization) if config.local_attack_score_enabled else {
+    score_result = score_request(normalization, headers=headers) if config.local_attack_score_enabled else {
         'scores': {}, 'evidence': {}, 'top_category': 'none', 'raw_top_category': 'none',
         'top_score': 0.0, 'top_evidence': [], 'summary': [],
     }
@@ -1591,7 +1596,11 @@ def analyze_request(method: str, path: str, body: str) -> Dict[str, Any]:
         f"block={config.local_score_block_threshold:.2f}|gray={config.local_score_gray_threshold:.2f}|"
         f"fast={config.local_score_fast_pass_threshold:.2f}"
     )
-    cache_key = f"req:{cache_dims}:{method}:{path}:{body[:200]}"
+    hdr_sig = ""
+    if headers:
+        joined = "|".join(f"{k.lower()}:{str(v)[:80]}" for k, v in sorted(headers.items()))
+        hdr_sig = hashlib.md5(joined.encode("utf-8", errors="ignore")).hexdigest()[:8]
+    cache_key = f"req:{cache_dims}:{method}:{path}:{body[:200]}:h={hdr_sig}"
 
     if config.cache_enabled:
         cached = llm_cache.get(cache_key)
@@ -2546,7 +2555,11 @@ async def proxy(path: str, request: Request):
         )
 
     # ========== 阶段1: 关键词层 + RAG 检索 + ReAct Agent ==========
-    req_result = analyze_request(request.method, full_url, body)
+    headers_for_scoring = {
+        k: v for k, v in request.headers.items()
+        if k.lower() in ("referer", "cookie", "user-agent")
+    }
+    req_result = analyze_request(request.method, full_url, body, headers=headers_for_scoring)
     req_result = _apply_eval_fail_closed(req_result, 'request', 'LLM 调用失败/不可解析，按 fail-closed 拦截')
 
     if req_result.get('llm_error') and not req_result.get('blocked'):

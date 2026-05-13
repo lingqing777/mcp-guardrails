@@ -10,10 +10,41 @@ from __future__ import annotations
 import math
 import re
 import urllib.parse
-from typing import Any, Dict, Iterable, List, Tuple
+from typing import Any, Dict, Iterable, List, Mapping, Optional, Tuple
+
+from normalization import double_url_decode, has_residual_percent
 
 
 ScoreHit = Tuple[str, float, str]
+
+
+LEGACY_PROBE_PATH_PREFIXES: Tuple[str, ...] = (
+    "/_vti_pvt",
+    "/_vti_bin",
+    "/_vti_cnf",
+    "/iisadmpwd/",
+    "/scripts/",
+    "/msadc/",
+    "/cgi-bin/printenv",
+)
+
+LEGACY_PROBE_SUFFIXES: Tuple[str, ...] = (
+    ".inc",
+    ".htr",
+    ".asa",
+    ".asax",
+    ".cmd",
+    ".bak",
+    ".old",
+    ".swp",
+)
+
+LEGACY_PROBE_SUFFIX_WHITELIST: set[str] = set()
+
+SCANNER_UA_PATTERNS = re.compile(
+    r"sqlmap|nikto|nessus|acunetix|wpscan|nmap[\s_-]+scripting|w3af|havij",
+    re.I,
+)
 
 
 ENDPOINT_PARAM_SCHEMAS: Dict[str, set[str]] = {
@@ -70,7 +101,8 @@ PATTERNS: Dict[str, List[Tuple[re.Pattern[str], float, str]]] = {
         (re.compile(r";\s*(?:drop|delete|insert|update|alter)\b", re.I), 0.55, "stacked_sql_write"),
         (re.compile(r"\b(?:sleep|benchmark|pg_sleep)\s*\(", re.I), 0.50, "time_based_sqli"),
         (re.compile(r"\bwaitfor\s+delay\b", re.I), 0.75, "mssql_waitfor_delay"),
-        (re.compile(r"(?:'|\")\s*(?:and|or)\s*(?:'|\")?\d+(?:'|\")?\s*=\s*(?:'|\")?\d+", re.I), 0.65, "quoted_boolean_tautology"),
+        (re.compile(r"(?:'|\")\s*(?:and|or)\s*(?:'|\")?\d+(?:'|\")?\s*=\s*(?:'|\")?\d+", re.I), 0.88, "quoted_boolean_tautology"),
+        (re.compile(r"(?:'|%27|\")\s*(?:or|and)\s*(?:'|\")?[a-zA-Z][a-zA-Z\d_]*(?:'|\")?\s*=\s*(?:'|\")?[a-zA-Z][a-zA-Z\d_]*", re.I), 0.88, "alpha_boolean_tautology"),
         (re.compile(r";\s*(?:select|waitfor)\b", re.I), 0.35, "stacked_sql_followup"),
         (re.compile(r"(?:--|#|/\*)", re.I), 0.18, "sql_comment"),
     ],
@@ -327,19 +359,133 @@ def _endpoint_method_hits(normalized: Dict[str, Any]) -> List[ScoreHit]:
     ]
 
 
-def score_request(normalized: Dict[str, Any]) -> Dict[str, Any]:
+def _legacy_probe_path_match(path: str) -> Optional[Tuple[str, str]]:
+    """Return (term, evidence) when the path matches a legacy probe pattern."""
+    if not path:
+        return None
+    bare = str(path).split("?", 1)[0].split("#", 1)[0]
+    lowered = bare.lower()
+
+    for prefix in LEGACY_PROBE_PATH_PREFIXES:
+        if prefix in lowered:
+            return ("legacy_web_probe_prefix", f"prefix={prefix}")
+
+    if bare in LEGACY_PROBE_SUFFIX_WHITELIST or lowered in LEGACY_PROBE_SUFFIX_WHITELIST:
+        return None
+
+    for suffix in LEGACY_PROBE_SUFFIXES:
+        if lowered.endswith(suffix):
+            return ("legacy_web_probe_suffix", f"suffix={suffix}")
+
+    return None
+
+
+def _legacy_probe_hits(normalized: Dict[str, Any]) -> List[ScoreHit]:
+    decoded = normalized.get("decoded", {}) if isinstance(normalized.get("decoded"), dict) else {}
+    original = normalized.get("original", {}) if isinstance(normalized.get("original"), dict) else {}
+    candidates = [
+        decoded.get("normalized_path"),
+        decoded.get("path"),
+        original.get("path"),
+    ]
+    seen: set[str] = set()
+    for candidate in candidates:
+        if not candidate:
+            continue
+        key = str(candidate)
+        if key in seen:
+            continue
+        seen.add(key)
+        match = _legacy_probe_path_match(key)
+        if match is None:
+            continue
+        term, evidence = match
+        return [(term, 0.95, evidence)]
+    return []
+
+
+def _multi_layer_encoding_hits(normalized: Dict[str, Any]) -> List[ScoreHit]:
+    """Flag inputs that still contain %XX residue after two URL decode passes.
+
+    The normalization layer already decodes twice, so any residue here means a
+    third encoding layer or deliberate obfuscation. Score is small (gray-zone
+    only) — never enough to direct-block on its own.
+    """
+    decoded = normalized.get("decoded", {}) if isinstance(normalized.get("decoded"), dict) else {}
+    for field in ("path", "body", "normalized_path"):
+        value = decoded.get(field) or ""
+        if value and has_residual_percent(value):
+            return [("multi_layer_encoding", 0.15, f"field={field}")]
+    return []
+
+
+SCORED_HEADER_NAMES = ("referer", "cookie", "user-agent")
+
+
+def score_headers(headers: Optional[Mapping[str, str]]) -> Dict[str, List[ScoreHit]]:
+    """Apply the pattern catalogue to selected request headers.
+
+    Returns hits grouped by category (`sql_injection`, `xss`, `path_traversal`,
+    `unknown`) so the caller can fold them into the matching category lists.
+    Scanner-tool signatures land in `unknown`.
+    """
+    out: Dict[str, List[ScoreHit]] = {
+        "sql_injection": [],
+        "xss": [],
+        "path_traversal": [],
+        "unknown": [],
+    }
+    if not headers:
+        return out
+
+    decoded_parts: List[str] = []
+    user_agent = ""
+    for raw_name, value in headers.items():
+        name = (raw_name or "").lower()
+        if name not in SCORED_HEADER_NAMES or not value:
+            continue
+        truncated = str(value)[:1024]
+        decoded = double_url_decode(truncated)
+        decoded_parts.append(f"[{name}] {decoded}")
+        if name == "user-agent":
+            user_agent = decoded
+
+    if user_agent and SCANNER_UA_PATTERNS.search(user_agent):
+        out["unknown"].append(("scanner_signature", 0.40, f"ua={user_agent[:80]}"))
+
+    if not decoded_parts:
+        return out
+
+    blob = "\n".join(decoded_parts)
+    for category in ("sql_injection", "xss", "path_traversal"):
+        for pattern, weight, term in PATTERNS[category]:
+            if pattern.search(blob):
+                out[category].append((f"header_{term}", weight, "header"))
+
+    return out
+
+
+def score_request(
+    normalized: Dict[str, Any],
+    headers: Optional[Mapping[str, str]] = None,
+) -> Dict[str, Any]:
     """Score a normalized request context."""
     text = str(normalized.get("analysis_text", ""))
     lower_text = text.lower()
     scores: Dict[str, float] = {}
     evidence: Dict[str, List[Dict[str, Any]]] = {}
 
+    header_hits = score_headers(headers)
+
     for category in PATTERNS:
         hits = _score_category(category, text)
+        hits.extend(header_hits.get(category, []))
         if category == "unknown":
+            hits.extend(_legacy_probe_hits(normalized))
             hits.extend(_endpoint_param_schema_hits(normalized))
             hits.extend(_endpoint_param_value_hits(normalized))
             hits.extend(_endpoint_method_hits(normalized))
+            hits.extend(_multi_layer_encoding_hits(normalized))
         if category == "credential_leakage" and hits:
             entropy = _entropy_hint(lower_text)
             if entropy > 0.55:
