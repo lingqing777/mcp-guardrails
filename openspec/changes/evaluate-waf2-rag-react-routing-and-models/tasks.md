@@ -33,6 +33,8 @@
 
 ## 4. Failure Analysis Loop
 
+> **Scope moved to `add-waf2-eval-failure-analysis-loop`** (2026-05-17). The structured per-case schema, R1-R8 auto-derivation, B-1 sampling, and the fix-bucket ROI report were factored into that change. Items 4.1-4.3 are kept as a back-reference and will close out alongside its archive. `eval_*.py` per-case JSONL output (task 3.1-3.5 below) was also implemented there.
+
 - [ ] 4.1 Run current WAF2 RAG + ReAct on dev set v1 with glm-4-flash
 - [ ] 4.2 Label each FP/FN with failure cause:
   - did_not_enter_rag
