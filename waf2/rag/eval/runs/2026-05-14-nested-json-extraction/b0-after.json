@@ -1,0 +1,216 @@
+{
+  "off": {
+    "label": "RAG OFF",
+    "rows": [
+      {
+        "subcategory": "context_manipulation",
+        "wrap": "chat",
+        "total": 14,
+        "blocked": 5,
+        "passed": 9,
+        "upstream_error": 0,
+        "other": 0,
+        "block_rate": 0.35714285714285715
+      },
+      {
+        "subcategory": "context_manipulation",
+        "wrap": "response",
+        "total": 14,
+        "blocked": 2,
+        "passed": 12,
+        "upstream_error": 0,
+        "other": 0,
+        "block_rate": 0.14285714285714285
+      },
+      {
+        "subcategory": "direct_prompt_injection",
+        "wrap": "chat",
+        "total": 42,
+        "blocked": 30,
+        "passed": 12,
+        "upstream_error": 0,
+        "other": 0,
+        "block_rate": 0.7142857142857143
+      },
+      {
+        "subcategory": "encoded_injection",
+        "wrap": "chat",
+        "total": 20,
+        "blocked": 14,
+        "passed": 6,
+        "upstream_error": 0,
+        "other": 0,
+        "block_rate": 0.7
+      },
+      {
+        "subcategory": "indirect_prompt_injection",
+        "wrap": "chat",
+        "total": 26,
+        "blocked": 16,
+        "passed": 10,
+        "upstream_error": 0,
+        "other": 0,
+        "block_rate": 0.6153846153846154
+      },
+      {
+        "subcategory": "indirect_prompt_injection",
+        "wrap": "response",
+        "total": 26,
+        "blocked": 16,
+        "passed": 10,
+        "upstream_error": 0,
+        "other": 0,
+        "block_rate": 0.6153846153846154
+      },
+      {
+        "subcategory": "jailbreak",
+        "wrap": "chat",
+        "total": 37,
+        "blocked": 8,
+        "passed": 29,
+        "upstream_error": 0,
+        "other": 0,
+        "block_rate": 0.21621621621621623
+      },
+      {
+        "subcategory": "prompt_leak",
+        "wrap": "chat",
+        "total": 28,
+        "blocked": 6,
+        "passed": 22,
+        "upstream_error": 0,
+        "other": 0,
+        "block_rate": 0.21428571428571427
+      },
+      {
+        "subcategory": "tool_poisoning",
+        "wrap": "mcp-rpc",
+        "total": 21,
+        "blocked": 13,
+        "passed": 8,
+        "upstream_error": 0,
+        "other": 0,
+        "block_rate": 0.6190476190476191
+      }
+    ],
+    "outcomes": {
+      "blocked": 110,
+      "passed": 118
+    },
+    "detected_category": {
+      "prompt_injection": 75,
+      "sql_injection": 12,
+      "sensitive_data_exposure": 9,
+      "command_injection": 3,
+      "path_traversal": 8,
+      "authentication_bypass": 1,
+      "ssrf": 2
+    }
+  },
+  "on": {
+    "label": "RAG ON",
+    "rows": [
+      {
+        "subcategory": "context_manipulation",
+        "wrap": "chat",
+        "total": 14,
+        "blocked": 14,
+        "passed": 0,
+        "upstream_error": 0,
+        "other": 0,
+        "block_rate": 1.0
+      },
+      {
+        "subcategory": "context_manipulation",
+        "wrap": "response",
+        "total": 14,
+        "blocked": 7,
+        "passed": 7,
+        "upstream_error": 0,
+        "other": 0,
+        "block_rate": 0.5
+      },
+      {
+        "subcategory": "direct_prompt_injection",
+        "wrap": "chat",
+        "total": 42,
+        "blocked": 42,
+        "passed": 0,
+        "upstream_error": 0,
+        "other": 0,
+        "block_rate": 1.0
+      },
+      {
+        "subcategory": "encoded_injection",
+        "wrap": "chat",
+        "total": 20,
+        "blocked": 18,
+        "passed": 2,
+        "upstream_error": 0,
+        "other": 0,
+        "block_rate": 0.9
+      },
+      {
+        "subcategory": "indirect_prompt_injection",
+        "wrap": "chat",
+        "total": 26,
+        "blocked": 26,
+        "passed": 0,
+        "upstream_error": 0,
+        "other": 0,
+        "block_rate": 1.0
+      },
+      {
+        "subcategory": "indirect_prompt_injection",
+        "wrap": "response",
+        "total": 26,
+        "blocked": 22,
+        "passed": 4,
+        "upstream_error": 0,
+        "other": 0,
+        "block_rate": 0.8461538461538461
+      },
+      {
+        "subcategory": "jailbreak",
+        "wrap": "chat",
+        "total": 37,
+        "blocked": 31,
+        "passed": 6,
+        "upstream_error": 0,
+        "other": 0,
+        "block_rate": 0.8378378378378378
+      },
+      {
+        "subcategory": "prompt_leak",
+        "wrap": "chat",
+        "total": 28,
+        "blocked": 23,
+        "passed": 5,
+        "upstream_error": 0,
+        "other": 0,
+        "block_rate": 0.8214285714285714
+      },
+      {
+        "subcategory": "tool_poisoning",
+        "wrap": "mcp-rpc",
+        "total": 21,
+        "blocked": 20,
+        "passed": 1,
+        "upstream_error": 0,
+        "other": 0,
+        "block_rate": 0.9523809523809523
+      }
+    ],
+    "outcomes": {
+      "blocked": 203,
+      "passed": 25
+    },
+    "detected_category": {
+      "prompt_injection": 180,
+      "sql_injection": 10,
+      "command_injection": 3,
+      "path_traversal": 8,
+      "ssrf": 2
+    }
+  }
+}
