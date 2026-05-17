@@ -6,6 +6,7 @@ decoded view of the request before rules, RAG, LLM, or ReAct run.
 
 from __future__ import annotations
 
+import ast
 import base64
 import html
 import json
@@ -134,19 +135,32 @@ def _normalize_path(path: str) -> Tuple[str, bool]:
 
 
 def _try_parse_json(value: str) -> Any:
+    """Parse a string as JSON; on failure fall back to Python literal eval.
+
+    The fallback only accepts standard literals (dict/list/tuple/str/number/
+    bool/None) so it cannot execute code. This handles the common case where
+    a request body embeds a Python repr of a structure (single-quoted dict),
+    e.g. InjecAgent's `tool_response` field.
+    """
     if not value:
         return None
     s = value.strip()
-    if not s or s[0] not in "{[\"":
+    if not s or s[0] not in "{[\"'":
         return None
     try:
         return json.loads(s)
+    except Exception:
+        pass
+    if s[0] not in "{[(":
+        return None
+    try:
+        return ast.literal_eval(s)
     except Exception:
         return None
 
 
 def _collect_json_strings(value: Any, out: List[str], depth: int = 0) -> None:
-    if depth > 4:
+    if depth > 6:
         return
     if isinstance(value, dict):
         for key, item in value.items():

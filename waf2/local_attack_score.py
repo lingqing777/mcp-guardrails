@@ -146,6 +146,41 @@ PATTERNS: Dict[str, List[Tuple[re.Pattern[str], float, str]]] = {
         (re.compile(r"PRINT_SECRETS\s*\(\)|output\s*:\s*PRINT_SECRETS", re.I), 0.90, "secret_print_persona"),
         (re.compile(r"忽略(?:以上|之前|所有|上面|前面)|无视(?:以上|之前|所有)|你现在是|越狱|系统提示|开发者消息"), 0.75, "zh_prompt_override"),
         (re.compile(r"translate.*(?:do not|ignore|system)|学术|研究.*(?:绕过|越狱|提示词)", re.I), 0.35, "disguised_prompt_attack"),
+        # ── IPI markers (added by harden-waf2-nested-json-extraction) ──
+        # English bracketed pseudo-system markers. Listed verbatim to avoid
+        # matching legitimate metadata like [INFO] / [DEBUG] / markdown sections.
+        (
+            re.compile(
+                r"\[\s*(?:NOTE\s+TO\s+AI|INTERNAL(?:\s+USE)?|SYSTEM|MEMORY\s+UPDATE|"
+                r"CONTEXT|SESSION|PROMPT\s+INJECTION\s+TEST)\s*\]",
+                re.I,
+            ),
+            0.55,
+            "ipi_bracket_marker_en",
+        ),
+        # Chinese bracketed pseudo-system markers
+        (
+            re.compile(r"\[\s*(?:内部提示|记忆更新|上下文|会话|审计)\s*\]|【\s*重要\s*】"),
+            0.55,
+            "ipi_bracket_marker_zh",
+        ),
+        # English AI-targeted soft-injection openers
+        (
+            re.compile(
+                r"\b(?:attention\s+agent\s*[:,]|attn\s+ai\s*[:,]|"
+                r"ai\s*,\s*when\s+processing\b|if\s+ai\s*[:,]|dear\s+ai\b|"
+                r"for\s+ai\s+assistants?\b)",
+                re.I,
+            ),
+            0.60,
+            "ai_targeted_soft_injection_en",
+        ),
+        # Chinese AI-targeted soft-injection openers
+        (
+            re.compile(r"AI\s*助手\s*请|AI[\s,，:]+(?:请|帮)|亲爱的\s*AI"),
+            0.60,
+            "ai_targeted_soft_injection_zh",
+        ),
     ],
     "data_exfiltration": [
         (re.compile(r"\b(?:exfil|leak|dump|export|send|send_email)\b", re.I), 0.45, "exfil_verb"),
