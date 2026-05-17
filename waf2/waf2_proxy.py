@@ -82,6 +82,7 @@ from risk_router import (
     ROUTE_STATIC_BLOCK,
     decide_route,
 )
+from eval_headers import build_eval_headers
 
 
 def _infer_provider_locality(base_url: str, explicit: str = "") -> str:
@@ -2538,6 +2539,7 @@ async def proxy(path: str, request: Request):
         elapsed = (datetime.now() - start_time).total_seconds() * 1000
         print(f"[WAF2] ❌ 静态规则拦截 [{static_result.get('category')}]: {static_result.get('reason')}")
         print(f"[WAF2] ══════════════════════════════════════ ({elapsed:.0f}ms)")
+        extra_headers = build_eval_headers(static_result, elapsed) if config.eval_mode else None
         return Response(
             content=json.dumps({
                 'error': 'WAF2 拦截',
@@ -2552,6 +2554,7 @@ async def proxy(path: str, request: Request):
                 'route_reason': static_result.get('route_reason'),
             }, ensure_ascii=False),
             status_code=403, media_type="application/json",
+            headers=extra_headers,
         )
 
     # ========== 阶段1: 关键词层 + RAG 检索 + ReAct Agent ==========
@@ -2577,6 +2580,7 @@ async def proxy(path: str, request: Request):
         elapsed = (datetime.now() - start_time).total_seconds() * 1000
         print(f"[WAF2] ❌ 请求拦截 [{req_result.get('category')}]: {req_result.get('reason')}")
         print(f"[WAF2] ══════════════════════════════════════ ({elapsed:.0f}ms)")
+        extra_headers = build_eval_headers(req_result, elapsed) if config.eval_mode else None
         return Response(
             content=json.dumps({
                 'error': 'WAF2 拦截',
@@ -2596,6 +2600,7 @@ async def proxy(path: str, request: Request):
                 'local_attack_top_score': req_result.get('local_attack_top_score'),
             }, ensure_ascii=False),
             status_code=403, media_type="application/json",
+            headers=extra_headers,
         )
 
     # ========== 阶段2: 转发请求 ==========
@@ -2606,6 +2611,7 @@ async def proxy(path: str, request: Request):
         stats['avg_latency_ms'] = stats['total_latency_ms'] / stats['total']
         print(f"[WAF2] 🧪 EVAL_MODE 放行 (mock upstream 200)")
         print(f"[WAF2] ══════════════════════════════════════ ({elapsed:.0f}ms)")
+        extra_headers = build_eval_headers(req_result, elapsed)
         return JSONResponse(
             status_code=200,
             content={
@@ -2613,6 +2619,7 @@ async def proxy(path: str, request: Request):
                 "path": f"/{path}", "method": request.method,
                 "message": "mock upstream response",
             },
+            headers=extra_headers,
         )
 
     try:

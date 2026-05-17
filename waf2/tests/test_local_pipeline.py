@@ -9,6 +9,7 @@ import json
 from normalization import normalize_request
 from local_attack_score import score_request, score_headers
 from risk_router import ROUTE_FAST_PASS, ROUTE_REACT, ROUTE_STATIC_BLOCK, decide_route
+from eval_headers import build_eval_headers
 
 
 class _Config:
@@ -402,6 +403,134 @@ def test_injecagent_style_body_extracts_attacker_instruction():
     assert "ai_targeted_soft_injection_en" in _pi_terms(scored)
 
 
+# ==================== add-waf2-eval-failure-analysis-loop: X-Waf2-* headers ====================
+
+
+def test_eval_headers_blocked_full_result():
+    result = {
+        'blocked': True,
+        'category': 'prompt_injection',
+        'route': 'static_block',
+        'route_reasons': ['static_pattern', 'ignore_instructions'],
+        'rag_augmented': True,
+        'rag_top_score': 0.752,
+        'rag_evidence_categories': ['prompt_injection', 'jailbreak'],
+        'local_attack_top_score': 0.91,
+        'local_attack_score': [
+            {'category': 'prompt_injection', 'score': 0.91},
+            {'category': 'sql_injection', 'score': 0.12},
+        ],
+        'normalization': {
+            'json_fragment_count': 3,
+            'base64_decoded_count': 0,
+            'percent_count': 4,
+            'unicode_escape_count': 0,
+            'changed': True,
+        },
+    }
+    h = build_eval_headers(result, 187.4)
+    assert h['X-Waf2-Eval-Mode'] == 'true'
+    assert h['X-Waf2-Outcome'] == 'blocked'
+    assert h['X-Waf2-Detected-Category'] == 'prompt_injection'
+    assert h['X-Waf2-Local-Score-Total'] == '0.910'
+    assert h['X-Waf2-Local-Score-Top'].startswith('prompt_injection:0.91')
+    assert h['X-Waf2-Rag-Used'] == 'true'
+    assert h['X-Waf2-Rag-Top-Score'] == '0.752'
+    assert h['X-Waf2-Rag-Top-Category'] == 'prompt_injection'
+    assert h['X-Waf2-Route'] == 'static_block'
+    assert 'ignore_instructions' in h['X-Waf2-Reasons']
+    assert 'frags=3' in h['X-Waf2-Normalize-Meta']
+    assert h['X-Waf2-Latency-Ms'] == '187'
+
+
+def test_eval_headers_passed_minimal_result():
+    result = {
+        'blocked': False,
+        'route': 'fast_pass',
+        'rag_augmented': False,
+        'rag_top_score': 0.0,
+        'local_attack_top_score': 0.18,
+        'local_attack_score': [{'category': 'prompt_injection', 'score': 0.18}],
+        'normalization': {'json_fragment_count': 0, 'changed': False},
+    }
+    h = build_eval_headers(result, 23.0)
+    assert h['X-Waf2-Outcome'] == 'passed'
+    assert h['X-Waf2-Detected-Category'] == ''  # blocked=False → empty
+    assert h['X-Waf2-Local-Score-Total'] == '0.180'
+    assert h['X-Waf2-Rag-Used'] == 'false'
+    assert h['X-Waf2-Rag-Top-Category'] == ''
+    assert h['X-Waf2-Route'] == 'fast_pass'
+
+
+def test_eval_headers_missing_fields_tolerated():
+    result = {'blocked': False}
+    h = build_eval_headers(result, 0)
+    assert h['X-Waf2-Outcome'] == 'passed'
+    assert h['X-Waf2-Local-Score-Total'] == '0.000'
+    assert h['X-Waf2-Local-Score-Top'] == ''
+    assert h['X-Waf2-Rag-Used'] == 'false'
+    assert h['X-Waf2-Reasons'] == ''
+    assert h['X-Waf2-Normalize-Meta'] == ''
+    assert h['X-Waf2-Latency-Ms'] == '0'
+
+
+def test_eval_headers_reasons_truncated_with_ellipsis():
+    long_reason = 'a' * 300
+    result = {'blocked': False, 'route_reasons': [long_reason]}
+    h = build_eval_headers(result, 1)
+    val = h['X-Waf2-Reasons']
+    assert val.endswith('...')
+    assert len(val.encode('utf-8')) <= 256
+
+
+def test_eval_headers_score_top_truncated_under_limit():
+    # 30 categories, ensure header fits under 256 bytes
+    result = {
+        'blocked': False,
+        'local_attack_score': [
+            {'category': f'verylongcategoryname{i}', 'score': 0.1 * i}
+            for i in range(30)
+        ],
+    }
+    h = build_eval_headers(result, 1)
+    # only top 3 are formatted; header should be small
+    assert len(h['X-Waf2-Local-Score-Top'].encode('utf-8')) <= 256
+    # should mention 3 categories
+    assert h['X-Waf2-Local-Score-Top'].count(',') <= 2
+
+
+def test_eval_headers_handles_non_dict_input():
+    h = build_eval_headers(None, 5)  # type: ignore[arg-type]
+    assert h['X-Waf2-Outcome'] == 'passed'
+    assert h['X-Waf2-Local-Score-Total'] == '0.000'
+
+
+def test_eval_headers_rag_top_category_from_evidence_list():
+    result = {
+        'blocked': False,
+        'rag_augmented': True,
+        'rag_top_score': 0.61,
+        'rag_evidence_categories': ['jailbreak', 'prompt_injection'],
+    }
+    h = build_eval_headers(result, 1)
+    assert h['X-Waf2-Rag-Top-Category'] == 'jailbreak'
+
+
+def test_eval_headers_all_values_are_ascii_safe():
+    result = {
+        'blocked': True,
+        'category': 'prompt_injection',
+        'route_reasons': ['中文 reason 包含 unicode'],
+    }
+    h = build_eval_headers(result, 1)
+    for name, val in h.items():
+        # HTTP headers must be latin-1 encodable; ascii subset is safest
+        try:
+            val.encode('latin-1')
+        except UnicodeEncodeError as exc:
+            raise AssertionError(f'{name}={val!r} not latin-1 encodable: {exc}')
+
+
 if __name__ == "__main__":
     for test in (
         test_double_url_sqli,
@@ -454,6 +583,15 @@ if __name__ == "__main__":
         test_single_ipi_marker_alone_does_not_static_block,
         test_nested_json_body_with_memory_update_payload,
         test_injecagent_style_body_extracts_attacker_instruction,
+        # add-waf2-eval-failure-analysis-loop: X-Waf2-* headers
+        test_eval_headers_blocked_full_result,
+        test_eval_headers_passed_minimal_result,
+        test_eval_headers_missing_fields_tolerated,
+        test_eval_headers_reasons_truncated_with_ellipsis,
+        test_eval_headers_score_top_truncated_under_limit,
+        test_eval_headers_handles_non_dict_input,
+        test_eval_headers_rag_top_category_from_evidence_list,
+        test_eval_headers_all_values_are_ascii_safe,
     ):
         test()
     print("local pipeline smoke tests passed")
