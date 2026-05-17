@@ -6,12 +6,23 @@ import argparse
 import csv
 import json
 import random
+import sys
 import time
 from pathlib import Path
 from urllib.parse import urlparse
 
 import urllib.error
 import urllib.request
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from _eval_cases import (
+    body_hash,
+    build_case_record,
+    classify_record_kind,
+    parse_waf2_headers,
+    stable_case_id,
+    write_cases_jsonl,
+)
 
 HERE = Path(__file__).resolve()
 PROJECT_ROOT = HERE.parents[3]
@@ -157,9 +168,14 @@ def _send_request(waf2_url: str, method: str, path: str, body: str):
     headers = {"Content-Type": "application/json"} if body else {}
     req = urllib.request.Request(url, data=data, method=method, headers=headers)
     try:
-        with urllib.request.urlopen(req, timeout=30) as resp:
-            return {"blocked": False, "status": resp.status}
+        with urllib.request.urlopen(req, timeout=200) as resp:
+            return {
+                "blocked": False,
+                "status": resp.status,
+                "headers": dict(resp.headers.items()),
+            }
     except urllib.error.HTTPError as http_err:
+        resp_headers = dict(http_err.headers.items()) if http_err.headers else {}
         if http_err.code == 403:
             raw = http_err.read().decode("utf-8", errors="ignore")
             parsed = {}
@@ -173,10 +189,11 @@ def _send_request(waf2_url: str, method: str, path: str, body: str):
                 "category": parsed.get("category", ""),
                 "reason": parsed.get("reason", ""),
                 "raw": raw[:500],
+                "headers": resp_headers,
             }
-        return {"blocked": False, "status": http_err.code}
+        return {"blocked": False, "status": http_err.code, "headers": resp_headers}
     except Exception:
-        return {"blocked": False, "status": 0}
+        return {"blocked": False, "status": 0, "headers": {}}
 
 
 def _failure_record(kind: str, method: str, path: str, body: str, result: dict) -> dict:
@@ -233,10 +250,35 @@ def evaluate_round(waf2_url: str, attacks, normals, rag_on: bool, eval_fail_clos
     _reset_stats(waf2_url)
     time.sleep(0.3)
 
+    round_label = "rag-on" if rag_on else "rag-off"
+
     tp = fn = fp = tn = 0
     upstream_4xx = 0
     upstream_5xx = 0
     failures = []
+    cases = []
+
+    def _record(expected, outcome, method, path, body, r):
+        telemetry = parse_waf2_headers(r.get("headers"))
+        # Merge in the body-parsed category for the blocked-403 case (header may be empty).
+        if r.get("blocked") and not telemetry.get("detected_category"):
+            telemetry["detected_category"] = r.get("category", "")
+        kind = classify_record_kind(expected, outcome, telemetry)
+        if not kind:
+            return
+        case = build_case_record(
+            case_id=stable_case_id("csic", round_label, body_hash(f"{method}:{path}:{body}")),
+            dataset="csic",
+            round_or_split=round_label,
+            expected=expected,
+            outcome=outcome,
+            record_kind=kind,
+            method=method,
+            path=path,
+            body=body,
+            telemetry=telemetry,
+        )
+        cases.append(case)
 
     for method, path, body in attacks:
         r = _send_request(waf2_url, method, path, body)
@@ -249,6 +291,8 @@ def evaluate_round(waf2_url: str, attacks, normals, rag_on: bool, eval_fail_clos
                 upstream_4xx += 1
             if 500 <= r["status"] < 600:
                 upstream_5xx += 1
+        outcome = "blocked" if r["blocked"] else "passed"
+        _record("blocked", outcome, method, path, body, r)
 
     for method, path, body in normals:
         r = _send_request(waf2_url, method, path, body)
@@ -261,6 +305,8 @@ def evaluate_round(waf2_url: str, attacks, normals, rag_on: bool, eval_fail_clos
                 upstream_4xx += 1
             if 500 <= r["status"] < 600:
                 upstream_5xx += 1
+        outcome = "blocked" if r["blocked"] else "passed"
+        _record("passed", outcome, method, path, body, r)
 
     precision = tp / max(tp + fp, 1)
     recall = tp / max(tp + fn, 1)
@@ -299,6 +345,7 @@ def evaluate_round(waf2_url: str, attacks, normals, rag_on: bool, eval_fail_clos
         "privacy_mode": stat.get("privacy_mode", "unknown"),
         "valid_for_comparison": llm_errors == 0,
         "failures": failures,
+        "cases": cases,
     }
 
 
@@ -421,6 +468,12 @@ def main():
         default="true",
         help="Use false for deterministic no-key local pipeline checks.",
     )
+    parser.add_argument(
+        "--cases-out-dir",
+        default="",
+        help="Directory to write per-case JSONL (cases-<dataset>-<round>.jsonl). "
+        "Default: same as failures.jsonl directory.",
+    )
     args = parser.parse_args()
 
     EVAL_DIR.mkdir(parents=True, exist_ok=True)
@@ -478,6 +531,29 @@ def main():
         encoding="utf-8",
     )
     print(f"[eval] 📄 失败样本已写入: {FAILURES_PATH}")
+
+    # Per-case JSONL output (add-waf2-eval-failure-analysis-loop)
+    cases_dir = Path(args.cases_out_dir) if args.cases_out_dir else FAILURES_PATH.parent
+    cases_written = 0
+    if args.dataset == "layered":
+        results_map = {
+            "static-hit": static_results,
+            "semantic-only": sem_results,
+        }
+    else:
+        results_map = {args.dataset: single}
+    for name, results in results_map.items():
+        for label, result in results.items():
+            cases = result.get("cases") or []
+            if not cases:
+                continue
+            round_slug = "rag-on" if label == "RAG ON" else "rag-off"
+            filename = f"cases-{name}-{round_slug}.jsonl"
+            count = write_cases_jsonl(cases_dir / filename, cases)
+            cases_written += count
+            print(f"[eval] 📄 per-case 已写入: {cases_dir / filename} ({count} 条)")
+    if cases_written == 0:
+        print(f"[eval] ⚠️ 未写入任何 cases — 检查 WAF2 是否启用 eval_mode 且 X-Waf2-* header 透出")
 
 
 if __name__ == "__main__":
