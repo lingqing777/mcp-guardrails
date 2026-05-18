@@ -40,6 +40,7 @@ FIX_TO_CHANGE = {
     "category_rule_refine": ("(local_attack_score refinement)", "unfiled"),
     "react_prompt_robustness": ("(ReAct prompt / parser robustness)", "unfiled"),
     "manual_review_required": ("(unknown; needs rule expansion)", "out-of-scope"),
+    "(none, monitored)": ("harden-waf2-react-fallback-rag-rescue (this)", "shipped"),
 }
 
 UNKNOWN_RATE_WARNING = 0.30
@@ -203,6 +204,20 @@ def _format_report(
         f"- unmatched (rule_id=R8 unknown): **{unknown}** "
         f"({unknown_rate:.1%})"
     )
+    # harden-waf2-react-fallback-rag-rescue: surface R10 (rescued) count
+    # separately so reports can show how many R9-style failures this change
+    # converted into successful blocks. R10 cases are also counted in the
+    # `(none, monitored)` fix bucket below.
+    rescued_count = agg["rule_counts"].get("R10", 0)
+    if rescued_count > 0:
+        r9_count = agg["rule_counts"].get("R9", 0)
+        denom = r9_count + rescued_count
+        ratio = (rescued_count / denom * 100) if denom else 0.0
+        lines.append(
+            f"- rescued by `harden-waf2-react-fallback-rag-rescue`: **{rescued_count}** "
+            f"(R10; previously would have been R9 = {r9_count}, rescue ratio "
+            f"{ratio:.1f}%)"
+        )
     if unknown_rate > UNKNOWN_RATE_WARNING:
         lines.append(
             f"- ⚠️ unknown rate exceeds {UNKNOWN_RATE_WARNING:.0%} — "

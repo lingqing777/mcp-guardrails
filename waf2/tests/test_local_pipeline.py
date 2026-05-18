@@ -531,6 +531,28 @@ def test_eval_headers_all_values_are_ascii_safe():
             raise AssertionError(f'{name}={val!r} not latin-1 encodable: {exc}')
 
 
+# ---------- harden-waf2-react-fallback-rag-rescue: rescue route in eval header ----------
+
+def test_eval_headers_serializes_rescue_route():
+    result = {
+        'blocked': True,
+        'category': 'prompt_injection',
+        'route': 'react_fallback_rag_rescue',
+        'route_reasons': ['rag_decisive_fallback', 'rag_score=0.620', 'local_cat'],
+        'rag_augmented': True,
+        'rag_top_score': 0.620,
+        'rag_evidence_categories': ['sql_injection'],  # rag mis-matched, local rescued
+        'local_attack_top_score': 0.55,
+        'local_attack_score': [{'category': 'prompt_injection', 'score': 0.55}],
+    }
+    h = build_eval_headers(result, 1)
+    assert h['X-Waf2-Outcome'] == 'blocked'
+    assert h['X-Waf2-Detected-Category'] == 'prompt_injection'
+    assert h['X-Waf2-Route'] == 'react_fallback_rag_rescue'
+    assert 'rag_decisive_fallback' in h['X-Waf2-Reasons']
+    assert 'local_cat' in h['X-Waf2-Reasons']
+
+
 if __name__ == "__main__":
     for test in (
         test_double_url_sqli,
@@ -592,6 +614,8 @@ if __name__ == "__main__":
         test_eval_headers_handles_non_dict_input,
         test_eval_headers_rag_top_category_from_evidence_list,
         test_eval_headers_all_values_are_ascii_safe,
+        # harden-waf2-react-fallback-rag-rescue
+        test_eval_headers_serializes_rescue_route,
     ):
         test()
     print("local pipeline smoke tests passed")

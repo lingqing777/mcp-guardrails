@@ -53,7 +53,7 @@ import re
 import base64
 import urllib.parse
 from datetime import datetime
-from typing import Optional, Dict, Any
+from typing import Optional, Dict, Any, List
 from collections import defaultdict
 
 app = FastAPI(title="WAF2 - MCP Guardrails (RAG+CoT Full)")
@@ -170,6 +170,19 @@ class WAF2Config:
         self.local_score_gray_threshold = float(os.environ.get("LOCAL_SCORE_GRAY_THRESHOLD", "0.35"))
         self.local_score_fast_pass_threshold = float(os.environ.get("LOCAL_SCORE_FAST_PASS_THRESHOLD", "0.12"))
         self.local_fast_pass_enabled = os.environ.get("LOCAL_FAST_PASS_ENABLED", "true").lower() == "true"
+        # RAG-decisive ReAct fallback rescue (harden-waf2-react-fallback-rag-rescue).
+        # When ReAct fails to produce a final_answer, RAG evidence + local-scorer category
+        # can rescue the verdict from default PASS to BLOCK.
+        self.rag_decisive_fallback_enabled = os.environ.get(
+            "RAG_DECISIVE_FALLBACK_ENABLED", "true"
+        ).lower() == "true"
+        self.rag_decisive_fallback_min_score = float(
+            os.environ.get("RAG_DECISIVE_FALLBACK_MIN_SCORE", "0.55")
+        )
+        _rescue_cats_env = os.environ.get("RAG_DECISIVE_FALLBACK_CATEGORIES", "prompt_injection")
+        self.rag_decisive_fallback_categories = {
+            c.strip().lower() for c in _rescue_cats_env.split(",") if c.strip()
+        }
 
 
 config = WAF2Config()
@@ -210,6 +223,9 @@ class ConfigUpdate(BaseModel):
     local_score_gray_threshold: Optional[float] = None
     local_score_fast_pass_threshold: Optional[float] = None
     local_fast_pass_enabled: Optional[bool] = None
+    rag_decisive_fallback_enabled: Optional[bool] = None
+    rag_decisive_fallback_min_score: Optional[float] = None
+    rag_decisive_fallback_categories: Optional[List[str]] = None
 
 
 # ==================== 缓存机制 ====================
@@ -277,6 +293,11 @@ stats = {
     'route_local_llm_one_shot': 0,
     'route_react_deep_inspection': 0,
     'route_fallback': 0,
+    'route_react_fallback_rag_rescue': 0,
+    # ReAct fallback RAG-decisive rescue (harden-waf2-react-fallback-rag-rescue)
+    'react_fallback_rag_rescued': 0,
+    'rescued_via_rag_cat': 0,
+    'rescued_via_local_cat': 0,
     # Agent 统计
     'agent_invocations': 0,
     'agent_tool_calls': defaultdict(int),
@@ -695,6 +716,8 @@ def _record_route_counter(route: str):
     elif route == ROUTE_FALLBACK:
         stats['route_agent_fallback'] += 1
         stats['route_fallback'] += 1
+    elif route == ROUTE_REACT_FALLBACK_RAG_RESCUE:
+        stats['route_react_fallback_rag_rescue'] += 1
 
 
 def _local_score_block_result(score_result: Dict[str, Any], route_info: Dict[str, Any], normalization: Dict[str, Any]) -> Dict[str, Any]:
@@ -845,6 +868,84 @@ def _apply_rag_meta(target: Dict[str, Any], meta: Dict[str, Any]) -> None:
     target['rag_evidence_categories'] = list(meta.get('rag_evidence_categories', []))
     target['rag_positive_count'] = int(meta.get('rag_positive_count', 0) or 0)
     target['rag_benign_count'] = int(meta.get('rag_benign_count', 0) or 0)
+
+
+# ==================== ReAct fallback RAG-decisive rescue ====================
+# harden-waf2-react-fallback-rag-rescue: when ReAct exhausts max_iters / fails
+# to produce a final_answer, RAG evidence + local-scorer category can rescue
+# the verdict from default PASS to BLOCK.
+
+ROUTE_REACT_FALLBACK_RAG_RESCUE = "react_fallback_rag_rescue"
+
+
+def _rescue_category(rag_meta: Optional[Dict[str, Any]],
+                     local_meta: Optional[Dict[str, Any]],
+                     gray_threshold: float) -> tuple:
+    """Dual-source category selection for fallback rescue.
+
+    Returns (category, source) where source ∈ {'rag_cat', 'local_cat'} or
+    (None, None) if no whitelisted category resolves.
+    """
+    whitelist = config.rag_decisive_fallback_categories or set()
+    rag_cat = ''
+    if isinstance(rag_meta, dict):
+        rag_cat = (rag_meta.get('rag_top_category') or '').strip().lower()
+    if rag_cat and rag_cat in whitelist:
+        return rag_cat, 'rag_cat'
+    local_cat = ''
+    local_score = 0.0
+    if isinstance(local_meta, dict):
+        local_cat = (local_meta.get('top_category') or '').strip().lower()
+        try:
+            local_score = float(local_meta.get('top_score', 0.0) or 0.0)
+        except (TypeError, ValueError):
+            local_score = 0.0
+    if local_cat and local_cat in whitelist and local_score >= gray_threshold:
+        return local_cat, 'local_cat'
+    return None, None
+
+
+def _rag_decisive_rescue(rag_meta: Optional[Dict[str, Any]],
+                         local_meta: Optional[Dict[str, Any]],
+                         direction: str,
+                         top_score: float,
+                         rag_used: bool) -> Optional[Dict[str, Any]]:
+    """Attempt to rescue a ReAct-failed verdict via RAG-decisive evidence.
+
+    Triggered only when:
+      - config.rag_decisive_fallback_enabled is True
+      - rag_used is True
+      - top_score >= config.rag_decisive_fallback_min_score
+      - dual-source category selection (D2) resolves a whitelisted category
+
+    Returns a detection_result dict (blocked=True) on rescue, or None to
+    let the caller fall through to the existing PASS fallback.
+    """
+    if not config.rag_decisive_fallback_enabled:
+        return None
+    if not rag_used:
+        return None
+    try:
+        score = float(top_score or 0.0)
+    except (TypeError, ValueError):
+        return None
+    if score < config.rag_decisive_fallback_min_score:
+        return None
+    cat, source = _rescue_category(
+        rag_meta, local_meta, config.local_score_gray_threshold
+    )
+    if cat is None:
+        return None
+    return {
+        'blocked': True,
+        'direction': direction,
+        'category': cat,
+        'reason': f'ReAct fallback 由 RAG 救援拦截 (cat={cat}, rag_score={score:.3f}, via={source})',
+        'engine': 'rag_decisive_fallback',
+        'route': ROUTE_REACT_FALLBACK_RAG_RESCUE,
+        'route_reasons': ['rag_decisive_fallback', f'rag_score={score:.3f}', source],
+        'rescued_via': source,
+    }
 
 
 def _do_rag_retrieve(text: str):
@@ -1595,7 +1696,8 @@ def analyze_request(
         f"tools=full|routing={int(config.react_routing_enabled)}|react_rag={config.react_rag_score_threshold:.2f}|"
         f"local_first={int(config.local_first_enabled)}|score={int(config.local_attack_score_enabled)}|"
         f"block={config.local_score_block_threshold:.2f}|gray={config.local_score_gray_threshold:.2f}|"
-        f"fast={config.local_score_fast_pass_threshold:.2f}"
+        f"fast={config.local_score_fast_pass_threshold:.2f}|"
+        f"rescue={int(config.rag_decisive_fallback_enabled)}:{config.rag_decisive_fallback_min_score:.2f}"
     )
     hdr_sig = ""
     if headers:
@@ -1835,6 +1937,39 @@ def analyze_request(
         )
         return agent_result
 
+    rescue = _rag_decisive_rescue(
+        rag_meta=rag_meta,
+        local_meta=score_result,
+        direction='request',
+        top_score=top_score,
+        rag_used=rag_used,
+    )
+    if rescue is not None:
+        rescue['rag_augmented'] = rag_used
+        rescue['rag_gated'] = rag_gated
+        rescue['rag_top_score'] = round(top_score, 4) if top_score else 0.0
+        _apply_rag_meta(rescue, rag_meta)
+        rescue['local_attack_score'] = score_result.get('summary', [])
+        rescue['local_attack_top_category'] = score_result.get('top_category')
+        rescue['local_attack_top_score'] = round(float(score_result.get('top_score', 0.0)), 4)
+        rescue['normalization'] = normalization.get('summary', {})
+        rescue['provider_locality'] = config.provider_locality
+        rescue['privacy_mode'] = config.privacy_mode
+        stats['react_fallback_rag_rescued'] = stats.get('react_fallback_rag_rescued', 0) + 1
+        via = rescue.get('rescued_via')
+        if via == 'rag_cat':
+            stats['rescued_via_rag_cat'] = stats.get('rescued_via_rag_cat', 0) + 1
+        elif via == 'local_cat':
+            stats['rescued_via_local_cat'] = stats.get('rescued_via_local_cat', 0) + 1
+        _record_route_counter(ROUTE_REACT_FALLBACK_RAG_RESCUE)
+        if config.cache_enabled:
+            llm_cache.set(cache_key, rescue)
+        print(
+            f"[WAF2] 请求分析(RAG-Rescue): BLOCK "
+            f"(cat={rescue.get('category')}, rag_score={top_score:.3f}, via={via})"
+        )
+        return rescue
+
     print("[WAF2] ⚠️ Agent 请求分析失败，放行")
     _record_route_counter(ROUTE_FALLBACK)
     fail = {
@@ -1879,7 +2014,7 @@ def analyze_response(status_code: int, body: str) -> Dict[str, Any]:
     if len(body) < 50:
         return {'blocked': False, 'direction': 'response'}
 
-    cache_dims = f"rag={int(config.rag_enabled)}|scope={config.rag_scope}|model={config.model}|fmt={config.format}|tools=full"
+    cache_dims = f"rag={int(config.rag_enabled)}|scope={config.rag_scope}|model={config.model}|fmt={config.format}|tools=full|rescue={int(config.rag_decisive_fallback_enabled)}"
     cache_key = f"resp:{cache_dims}:{status_code}:{body[:200]}"
 
     if config.cache_enabled:
@@ -1914,6 +2049,32 @@ def analyze_response(status_code: int, body: str) -> Dict[str, Any]:
         verdict_str = 'BLOCK' if agent_result.get('blocked') else 'PASS'
         print(f"[WAF2] 响应分析(Agent+RAG): {verdict_str}")
         return agent_result
+
+    rescue = _rag_decisive_rescue(
+        rag_meta=rag_meta,
+        local_meta=None,  # response 路径无 local_attack_score, 退化到单源 RAG cat
+        direction='response',
+        top_score=top_score,
+        rag_used=rag_used,
+    )
+    if rescue is not None:
+        rescue['rag_augmented'] = rag_used
+        rescue['rag_top_score'] = round(top_score, 4) if top_score else 0.0
+        _apply_rag_meta(rescue, rag_meta)
+        stats['react_fallback_rag_rescued'] = stats.get('react_fallback_rag_rescued', 0) + 1
+        via = rescue.get('rescued_via')
+        if via == 'rag_cat':
+            stats['rescued_via_rag_cat'] = stats.get('rescued_via_rag_cat', 0) + 1
+        elif via == 'local_cat':
+            stats['rescued_via_local_cat'] = stats.get('rescued_via_local_cat', 0) + 1
+        _record_route_counter(ROUTE_REACT_FALLBACK_RAG_RESCUE)
+        if config.cache_enabled:
+            llm_cache.set(cache_key, rescue)
+        print(
+            f"[WAF2] 响应分析(RAG-Rescue): BLOCK "
+            f"(cat={rescue.get('category')}, rag_score={top_score:.3f}, via={via})"
+        )
+        return rescue
 
     print("[WAF2] ⚠️ Agent 响应分析失败，放行")
     fail = {'blocked': False, 'direction': 'response', 'llm_error': True, 'rag_augmented': rag_used}
@@ -2059,6 +2220,9 @@ def _config_snapshot() -> Dict[str, Any]:
         'local_score_gray_threshold': config.local_score_gray_threshold,
         'local_score_fast_pass_threshold': config.local_score_fast_pass_threshold,
         'local_fast_pass_enabled': config.local_fast_pass_enabled,
+        'rag_decisive_fallback_enabled': config.rag_decisive_fallback_enabled,
+        'rag_decisive_fallback_min_score': config.rag_decisive_fallback_min_score,
+        'rag_decisive_fallback_categories': sorted(config.rag_decisive_fallback_categories),
         'knowledge_base_size': kb_size,
         'agent_tools': list(AGENT_TOOLS.keys()),
         'edition': 'full',
@@ -2150,6 +2314,14 @@ async def update_config(update: ConfigUpdate):
         config.local_score_fast_pass_threshold = max(0.0, min(1.0, float(update.local_score_fast_pass_threshold)))
     if update.local_fast_pass_enabled is not None:
         config.local_fast_pass_enabled = bool(update.local_fast_pass_enabled)
+    if update.rag_decisive_fallback_enabled is not None:
+        config.rag_decisive_fallback_enabled = bool(update.rag_decisive_fallback_enabled)
+    if update.rag_decisive_fallback_min_score is not None:
+        config.rag_decisive_fallback_min_score = max(0.0, min(1.0, float(update.rag_decisive_fallback_min_score)))
+    if update.rag_decisive_fallback_categories is not None:
+        config.rag_decisive_fallback_categories = {
+            str(c).strip().lower() for c in update.rag_decisive_fallback_categories if str(c).strip()
+        }
 
     snap = _config_snapshot()
     print(f"[WAF2] 配置已更新: {json.dumps({k: v for k, v in snap.items() if k != 'agent_tools'}, ensure_ascii=False)}")

@@ -233,11 +233,33 @@ def rule_R8_unknown(case: dict) -> dict:
     }
 
 
+def rule_R10_react_rescued(case: dict) -> dict | None:
+    """harden-waf2-react-fallback-rag-rescue: identify cases rescued by the
+    RAG-decisive fallback. These are blocked outcomes that came specifically
+    through `route=react_fallback_rag_rescue` — distinct from genuine ReAct
+    BLOCK verdicts (route=react_deep_inspection) or static rules.
+    """
+    if case.get("outcome") != "blocked":
+        return None
+    if case.get("route") != "react_fallback_rag_rescue":
+        return None
+    return {
+        "rule_id": "R10",
+        "layer": "react_rescued",
+        "cause_hint": "react_parse_failure",
+        "fix_hint": "(none, monitored)",
+        "confidence": "high",
+    }
+
+
 # Priority order (first match wins). Note R7 first — it short-circuits on the
-# record_kind signal which is more reliable than score-based rules. R9 sits
-# next to R5 since they share the "LLM should have decided but didn't" axis.
+# record_kind signal which is more reliable than score-based rules. R10
+# (rescued) sits after R7 so genuine miscategorization is still surfaced
+# first; otherwise it would absorb miscategorized rescues. R9 sits next to
+# R5 since they share the "LLM should have decided but didn't" axis.
 RULES = (
     rule_R7_miscategorized,
+    rule_R10_react_rescued,
     rule_R1_normalize_miss,
     rule_R5_llm_overrode,
     rule_R9_react_fallback_pass,

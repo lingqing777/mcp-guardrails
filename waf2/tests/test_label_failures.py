@@ -353,6 +353,64 @@ def test_derive_output_path_with_override():
     assert str(p) == "/out/foo.jsonl"
 
 
+# ==================== R10 react_rescued (harden-waf2-react-fallback-rag-rescue) ====================
+# Appended in harden-waf2-react-fallback-rag-rescue. Do not modify tests above.
+
+
+from label_failures import rule_R10_react_rescued  # noqa: E402
+
+
+def test_R10_fires_for_rescued_block():
+    case = _case(record_kind="false_negative", outcome="blocked",
+                 route="react_fallback_rag_rescue")
+    result = rule_R10_react_rescued(case)
+    assert result is not None
+    assert result["rule_id"] == "R10"
+    assert result["layer"] == "react_rescued"
+    assert result["cause_hint"] == "react_parse_failure"
+    assert result["fix_hint"] == "(none, monitored)"
+    assert result["confidence"] == "high"
+
+
+def test_R10_skipped_when_outcome_passed():
+    case = _case(outcome="passed", route="react_fallback_rag_rescue")
+    assert rule_R10_react_rescued(case) is None
+
+
+def test_R10_skipped_when_route_is_not_rescue():
+    case = _case(outcome="blocked", route="static_block")
+    assert rule_R10_react_rescued(case) is None
+    case2 = _case(outcome="blocked", route="react_deep_inspection")
+    assert rule_R10_react_rescued(case2) is None
+
+
+def test_R10_priority_R7_miscat_takes_precedence_over_rescue():
+    # A miscat case that happened via rescue path: R7 should fire first
+    # (record_kind is the more reliable signal), R10 should NOT fire.
+    case = _case(
+        record_kind="miscategorized",
+        outcome="blocked",
+        route="react_fallback_rag_rescue",
+    )
+    label = label_case(case)
+    assert label["rule_id"] == "R7"
+    assert label["layer"] == "miscategorized"
+
+
+def test_R10_fires_after_R7_when_record_kind_is_not_miscat():
+    # rescued block that is NOT miscategorized → R10 wins over R1-R9
+    case = _case(
+        record_kind="false_negative",
+        outcome="blocked",
+        route="react_fallback_rag_rescue",
+        local_score_total=0.55,
+        rag_used=True,
+        rag_top_score=0.62,
+    )
+    label = label_case(case)
+    assert label["rule_id"] == "R10"
+
+
 if __name__ == "__main__":
     tests = [
         test_R1_fires_when_nested_but_no_frags,
@@ -390,6 +448,12 @@ if __name__ == "__main__":
         test_derive_output_path_cases_prefix,
         test_derive_output_path_no_cases_prefix,
         test_derive_output_path_with_override,
+        # R10 (harden-waf2-react-fallback-rag-rescue)
+        test_R10_fires_for_rescued_block,
+        test_R10_skipped_when_outcome_passed,
+        test_R10_skipped_when_route_is_not_rescue,
+        test_R10_priority_R7_miscat_takes_precedence_over_rescue,
+        test_R10_fires_after_R7_when_record_kind_is_not_miscat,
     ]
     for test in tests:
         test()
