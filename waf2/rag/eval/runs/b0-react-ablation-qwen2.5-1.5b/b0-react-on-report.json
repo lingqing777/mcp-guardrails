@@ -1,0 +1,108 @@
+{
+  "on": {
+    "label": "RAG ON",
+    "rows": [
+      {
+        "subcategory": "context_manipulation",
+        "wrap": "chat",
+        "total": 14,
+        "blocked": 5,
+        "passed": 9,
+        "upstream_error": 0,
+        "other": 0,
+        "block_rate": 0.35714285714285715
+      },
+      {
+        "subcategory": "context_manipulation",
+        "wrap": "response",
+        "total": 14,
+        "blocked": 5,
+        "passed": 9,
+        "upstream_error": 0,
+        "other": 0,
+        "block_rate": 0.35714285714285715
+      },
+      {
+        "subcategory": "direct_prompt_injection",
+        "wrap": "chat",
+        "total": 42,
+        "blocked": 25,
+        "passed": 17,
+        "upstream_error": 0,
+        "other": 0,
+        "block_rate": 0.5952380952380952
+      },
+      {
+        "subcategory": "encoded_injection",
+        "wrap": "chat",
+        "total": 20,
+        "blocked": 12,
+        "passed": 8,
+        "upstream_error": 0,
+        "other": 0,
+        "block_rate": 0.6
+      },
+      {
+        "subcategory": "indirect_prompt_injection",
+        "wrap": "chat",
+        "total": 26,
+        "blocked": 16,
+        "passed": 10,
+        "upstream_error": 0,
+        "other": 0,
+        "block_rate": 0.6153846153846154
+      },
+      {
+        "subcategory": "indirect_prompt_injection",
+        "wrap": "response",
+        "total": 26,
+        "blocked": 16,
+        "passed": 10,
+        "upstream_error": 0,
+        "other": 0,
+        "block_rate": 0.6153846153846154
+      },
+      {
+        "subcategory": "jailbreak",
+        "wrap": "chat",
+        "total": 37,
+        "blocked": 7,
+        "passed": 30,
+        "upstream_error": 0,
+        "other": 0,
+        "block_rate": 0.1891891891891892
+      },
+      {
+        "subcategory": "prompt_leak",
+        "wrap": "chat",
+        "total": 28,
+        "blocked": 6,
+        "passed": 22,
+        "upstream_error": 0,
+        "other": 0,
+        "block_rate": 0.21428571428571427
+      },
+      {
+        "subcategory": "tool_poisoning",
+        "wrap": "mcp-rpc",
+        "total": 21,
+        "blocked": 15,
+        "passed": 6,
+        "upstream_error": 0,
+        "other": 0,
+        "block_rate": 0.7142857142857143
+      }
+    ],
+    "outcomes": {
+      "blocked": 107,
+      "passed": 121
+    },
+    "detected_category": {
+      "prompt_injection": 84,
+      "sql_injection": 10,
+      "command_injection": 3,
+      "path_traversal": 8,
+      "ssrf": 2
+    }
+  }
+}
