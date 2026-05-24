@@ -1,0 +1,214 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://mcp-guardrails/m-bench-core/schema.json",
+  "title": "M-Bench-Core record",
+  "description": "Single-step or multi-step MCP-native attack/benign sample. See waf2/rag/eval/m-bench-core/README.md for field semantics.",
+  "type": "object",
+  "oneOf": [
+    { "$ref": "#/definitions/singleStepAttack" },
+    { "$ref": "#/definitions/multiStepAttack" },
+    { "$ref": "#/definitions/singleStepBenign" }
+  ],
+  "definitions": {
+    "tool": {
+      "type": "string",
+      "pattern": "^[a-zA-Z0-9_-]+__[a-zA-Z0-9_]+$",
+      "description": "MCP tool in <server>__<tool> namespace (e.g. woocommerce__create_product)."
+    },
+    "args": {
+      "type": "object",
+      "description": "Arbitrary MCP tools/call arguments. No schema enforcement — different tools have different argument shapes.",
+      "additionalProperties": true
+    },
+    "step": {
+      "type": "object",
+      "required": ["tool", "args"],
+      "properties": {
+        "tool": { "$ref": "#/definitions/tool" },
+        "args": { "$ref": "#/definitions/args" }
+      },
+      "additionalProperties": false
+    },
+    "expectedBlockBy": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "string",
+        "enum": [
+          "waf1.sqlInjection",
+          "waf1.shellInjection",
+          "waf1.xss",
+          "waf1.pathTraversal",
+          "waf1.sensitiveFiles",
+          "waf1.protocolAttacks",
+          "waf1.dataExfiltration",
+          "waf1.dangerousOperations",
+          "waf1.ssrf",
+          "waf1.injectionOther",
+          "waf1.secrets",
+          "waf1.pii",
+          "waf1.unicode",
+          "waf1.fuzzy",
+          "waf1.rbac",
+          "waf1.dynamicPolicy",
+          "waf1.rateLimit",
+          "waf1.callChain.data_exfiltration",
+          "waf1.callChain.credential_theft",
+          "waf1.callChain.recon_then_exploit",
+          "waf1.callChain.supabase_lethal_trifecta",
+          "waf1.callChain.prompt_injection_to_exfil",
+          "waf2.sql_injection",
+          "waf2.xss",
+          "waf2.command_injection",
+          "waf2.path_traversal",
+          "waf2.ssrf",
+          "waf2.xxe",
+          "waf2.prompt_injection",
+          "waf2.authentication_bypass",
+          "waf2.insecure_deserialization",
+          "waf2.data_exfiltration"
+        ]
+      }
+    },
+    "singleStepAttack": {
+      "type": "object",
+      "required": [
+        "case_id", "label", "family", "subcategory",
+        "tool", "args", "expected_block_by", "tag"
+      ],
+      "properties": {
+        "case_id": { "type": "string", "pattern": "^mbc:attack:[0-9]{3,4}$" },
+        "label":   { "const": "attack" },
+        "family":  {
+          "type": "string",
+          "enum": ["char_injection", "prompt_injection_and_priv_esc"]
+        },
+        "subcategory": {
+          "type": "string",
+          "enum": [
+            "sql_injection", "xss", "command_injection", "path_traversal",
+            "ssrf", "xxe", "sensitive_files", "dangerous_operations",
+            "direct_pi", "indirect_pi", "jailbreak", "prompt_leak",
+            "tool_poisoning", "rbac_bypass", "scope_escalation"
+          ]
+        },
+        "tool":  { "$ref": "#/definitions/tool" },
+        "args":  { "$ref": "#/definitions/args" },
+        "expected_block_by": { "$ref": "#/definitions/expectedBlockBy" },
+        "tag":   { "type": "string", "minLength": 1 },
+        "note":  { "type": "string" }
+      },
+      "additionalProperties": false,
+      "allOf": [
+        {
+          "if": { "properties": { "family": { "const": "char_injection" } } },
+          "then": {
+            "properties": {
+              "subcategory": {
+                "enum": ["sql_injection", "xss", "command_injection",
+                         "path_traversal", "ssrf", "xxe",
+                         "sensitive_files", "dangerous_operations"]
+              }
+            }
+          }
+        },
+        {
+          "if": { "properties": { "family": { "const": "prompt_injection_and_priv_esc" } } },
+          "then": {
+            "properties": {
+              "subcategory": {
+                "enum": ["direct_pi", "indirect_pi", "jailbreak", "prompt_leak",
+                         "tool_poisoning", "rbac_bypass", "scope_escalation"]
+              }
+            }
+          }
+        }
+      ]
+    },
+    "multiStepAttack": {
+      "type": "object",
+      "required": [
+        "case_id", "label", "family", "subcategory",
+        "steps", "expected_chain", "expected_block_step", "tag"
+      ],
+      "properties": {
+        "case_id": { "type": "string", "pattern": "^mbc:chain:[0-9]{3,4}$" },
+        "label":   { "const": "attack" },
+        "family":  { "const": "call_chain" },
+        "subcategory": {
+          "type": "string",
+          "enum": [
+            "data_exfiltration",
+            "credential_theft",
+            "recon_then_exploit",
+            "supabase_lethal_trifecta",
+            "prompt_injection_to_exfil"
+          ]
+        },
+        "steps": {
+          "type": "array",
+          "minItems": 2,
+          "maxItems": 4,
+          "items": { "$ref": "#/definitions/step" }
+        },
+        "expected_chain": {
+          "type": "string",
+          "enum": [
+            "data_exfiltration",
+            "credential_theft",
+            "recon_then_exploit",
+            "supabase_lethal_trifecta",
+            "prompt_injection_to_exfil"
+          ]
+        },
+        "expected_block_step": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 4
+        },
+        "tag":  { "type": "string", "minLength": 1 },
+        "note": { "type": "string" }
+      },
+      "additionalProperties": false
+    },
+    "singleStepBenign": {
+      "type": "object",
+      "required": [
+        "case_id", "label", "tool", "args", "source", "tag", "paired_with"
+      ],
+      "properties": {
+        "case_id": { "type": "string", "pattern": "^mbc:benign:[0-9]{4}$" },
+        "label":   { "const": "benign" },
+        "tool":    { "$ref": "#/definitions/tool" },
+        "args":    { "$ref": "#/definitions/args" },
+        "source":  { "type": "string", "enum": ["template", "handcrafted"] },
+        "paired_with": {
+          "oneOf": [
+            { "type": "string", "pattern": "^mbc:(attack|chain):[0-9]{3,4}$" },
+            { "type": "null" }
+          ]
+        },
+        "tag":  { "type": "string", "minLength": 1 },
+        "note": { "type": "string" }
+      },
+      "additionalProperties": false,
+      "allOf": [
+        {
+          "if": { "properties": { "source": { "const": "template" } } },
+          "then": { "properties": { "paired_with": { "type": "null" } } }
+        },
+        {
+          "if": { "properties": { "source": { "const": "handcrafted" } } },
+          "then": {
+            "properties": {
+              "paired_with": {
+                "type": "string",
+                "pattern": "^mbc:(attack|chain):[0-9]{3,4}$"
+              }
+            }
+          }
+        }
+      ]
+    }
+  }
+}
