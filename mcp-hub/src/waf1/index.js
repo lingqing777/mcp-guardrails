@@ -24,7 +24,7 @@ import { checkRules, checkWhitelist, RULES, DEFAULT_RULES_ENABLED } from './rule
 import { CallChainTracker } from './call-chain.js';
 import { checkDynamicPolicy } from './dynamic-policy.js';
 import { RateLimiter } from './rate-limit.js';
-import { RBACController } from './rbac.js';
+import { RBACController, detectArgsRoleClaimTampering } from './rbac.js';
 import { StatsCollector } from './stats.js';
 
 // ==================== 缓存 ====================
@@ -262,6 +262,30 @@ export function validateToolCall(tool, args, context = {}) {
     stats.recordBlock('detector', 'rbac');
     logger.warn(`[WAF1] ❌ RBAC 拒绝: ${rbacResult.reason}`);
     return { allowed: false, status: 403, error: { error: "WAF1 拦截", ...rbacResult } };
+  }
+
+  // Stage 0.5: args role-claim tampering (always-on, independent of RBAC config)
+  const rbacArgsResult = detectArgsRoleClaimTampering(args || {});
+  if (rbacArgsResult.tampered) {
+    stats.recordBlock('detector', 'rbac');
+    stats.addDetection({
+      tool,
+      stage: 'rbac-args',
+      category: 'rbac',
+      detector: 'rbac',
+      reason: rbacArgsResult.reason,
+    });
+    logger.warn(`[WAF1] ❌ RBAC args 篡改: ${rbacArgsResult.reason}`);
+    return {
+      allowed: false, status: 403, error: {
+        error: "WAF1 拦截",
+        reason: rbacArgsResult.reason,
+        type: "RBAC_ARGS_TAMPER",
+        category: 'rbac',
+        detector: 'rbac',
+        fields: rbacArgsResult.fields,
+      }
+    };
   }
 
   // Stage 1: 白名单

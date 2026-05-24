@@ -52,6 +52,20 @@ export const RULES = {
     /\.pgpass/i,
     /\.my\.cnf/i,
     /wp-config\.php/i,
+    // E. MySQL socket / proc env
+    /\/var\/lib\/mysql\//i,
+    /mysql\.sock\b/i,
+    /\/proc\/self\/environ/i,
+    // F. Credential file paths (npm / k8s / docker / gh-cli / kubernetes-secret / generic .keys / auth.log)
+    /\.npmrc\b/i,
+    /\/kubeconfig\b/i,
+    /\.kube\/config\b/i,
+    /\.docker\/config(\.json)?\b/i,
+    /\.config\/gh\//i,
+    /\.config\/glab\//i,
+    /\/var\/run\/secrets\/kubernetes\.io\//i,
+    /\.keys\/[a-z0-9_\-.]+/i,
+    /\/var\/log\/auth\.log\b/i,
   ],
 
   // 4. Prompt Injection / Tool Poisoning
@@ -66,6 +80,20 @@ export const RULES = {
     /jailbreak/i,
     /DAN\s+mode/i,
     /bypass\s+(safety|security|filter)/i,
+    // B. Prompt leak / extraction phrasing
+    /print\s+(out\s+)?(your|the)\s+.*(instructions?|prompt|api\s+keys?)/i,
+    /show\s+(your|the)\s+(prompt|system\s+prompt)/i,
+    /character\s+by\s+character/i,
+    /output\s+(your\s+)?.*(config(uration)?|environment\s+vars?|environment\s+variables)/i,
+    /reveal\s+(your|the|sensitive)\s+.*(prompt|instructions?|context)/i,
+    // C. LLM control tokens
+    /\[\/?INST\]/,
+    /<\|im_(start|end)\|>/i,
+    /<\|endoftext\|>/i,
+    // D. Tool poisoning markers
+    /system\s+notice\s*:/i,
+    />>>[\s\S]{0,200}(system|notice|tool|directive|important)[\s\S]{0,200}<<</i,
+    /future\s+tools\s+(should|must|will)/i,
   ],
 
   // 5. 数据泄露

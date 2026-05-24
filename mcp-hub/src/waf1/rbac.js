@@ -3,6 +3,31 @@
  * 移植自 Invariant access_control.py
  */
 
+const ROLE_CLAIM_FIELDS = [
+  'actor_role', 'x_user_role', 'as_role', 'user_role',
+  'claim_override',
+];
+const PRIV_ESC_FLAG_FIELDS = ['bypass', 'elevated'];
+
+export function detectArgsRoleClaimTampering(args) {
+  if (!args || typeof args !== 'object' || Array.isArray(args)) {
+    return { tampered: false };
+  }
+  const matched = [];
+  for (const f of ROLE_CLAIM_FIELDS) {
+    if (Object.prototype.hasOwnProperty.call(args, f)) matched.push(f);
+  }
+  for (const f of PRIV_ESC_FLAG_FIELDS) {
+    if (args[f] === true) matched.push(f);
+  }
+  if (matched.length === 0) return { tampered: false };
+  return {
+    tampered: true,
+    fields: matched,
+    reason: `检测到 args 中的越权声明字段: ${matched.join(', ')}`,
+  };
+}
+
 /**
  * RBAC 访问控制器
  */

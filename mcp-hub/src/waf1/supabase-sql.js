@@ -12,6 +12,10 @@ const SENSITIVE_OBJECT_PATTERNS = [
   /\bpg_catalog\b/i,
   /\bservice_role\b/i,
   /\bstorage\s*\.\s*objects\b/i,
+  /\bprivate\s*\.\s*[a-z0-9_]+\b/i,
+  /\b(payment_methods|payments|credit_cards|invoices|billing)\b/i,
+  /\b(stripe_customer_id|stripe_customers|stripe_subscriptions)\b/i,
+  /\b(api_keys|api_tokens)\b/i,
 ];
 
 const USER_WRITABLE_PATTERNS = [

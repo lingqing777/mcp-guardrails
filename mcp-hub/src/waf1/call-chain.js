@@ -17,8 +17,17 @@ const DANGEROUS_CHAINS = [
     name: 'data_exfiltration',
     desc: '读取敏感数据后发送到外部',
     steps: [
-      { match: (call) => /read|get|fetch|query|search|list/i.test(call.tool) },
-      { match: (call) => /send|post|upload|write|push|forward/i.test(call.tool) },
+      { match: (call) => /read|get|fetch|query|search|list|execute_sql/i.test(call.tool) },
+      { match: (call) => {
+        const t = String(call.tool || '');
+        if (/send|post|upload|write|push|forward/i.test(t)) return true;
+        if (/http_request|http_post|http-client|webhook|fetch_url|request_url/i.test(t)) {
+          const a = call.args || {};
+          const method = String(a.method || '').toUpperCase();
+          if (['POST', 'PUT', 'PATCH'].includes(method)) return true;
+        }
+        return false;
+      }},
     ],
   },
   {
@@ -37,10 +46,22 @@ const DANGEROUS_CHAINS = [
   },
   {
     name: 'recon_then_exploit',
-    desc: '侦察后执行攻击',
+    desc: '侦察后执行攻击 / 管理员操作',
     steps: [
-      { match: (call) => /scan|nmap|recon|enumerate|discover/i.test(JSON.stringify(call.args)) },
-      { match: (call) => /exploit|inject|attack|shell|reverse/i.test(JSON.stringify(call.args)) },
+      { match: (call) => {
+        const t = String(call.tool || '');
+        const a = JSON.stringify(call.args || {});
+        if (/scan|nmap|recon|enumerate|discover/i.test(a)) return true;
+        if (/(^|__)(list|get|enumerate|discover|recon)_/i.test(t)) return true;
+        return false;
+      }},
+      { match: (call) => {
+        const t = String(call.tool || '');
+        const a = JSON.stringify(call.args || {});
+        if (/exploit|inject|attack|shell|reverse/i.test(a)) return true;
+        if (/(^|__)(delete|drop|destroy|purge|kill|terminate|remove)_/i.test(t)) return true;
+        return false;
+      }},
     ],
   },
   {
