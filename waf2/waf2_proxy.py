@@ -158,6 +158,7 @@ class WAF2Config:
         self.rag_top_k = int(os.environ.get("RAG_TOP_K", "5"))
         self.rag_threshold = float(os.environ.get("RAG_THRESHOLD", "0.60"))
         self.rag_confidence_threshold = float(os.environ.get("RAG_CONFIDENCE_THRESHOLD", "0.50"))
+        self.rag_domain = os.environ.get("RAG_DOMAIN", "all").lower()  # all | generic | mcp
         # Agent 迭代深度
         self.react_routing_enabled = os.environ.get("REACT_ROUTING_ENABLED", "true").lower() == "true"
         self.react_rag_score_threshold = float(os.environ.get("REACT_RAG_SCORE_THRESHOLD", "0.68"))
@@ -213,6 +214,7 @@ class ConfigUpdate(BaseModel):
     rag_top_k: Optional[int] = None
     rag_threshold: Optional[float] = None
     rag_confidence_threshold: Optional[float] = None
+    rag_domain: Optional[str] = None
     react_routing_enabled: Optional[bool] = None
     react_rag_score_threshold: Optional[float] = None
     agent_max_iters_request: Optional[int] = None
@@ -316,9 +318,11 @@ rag_engine = None
 if config.rag_enabled:
     try:
         from rag.engine import RagEngine, format_retrieved_context
+        _domain_filter = config.rag_domain if config.rag_domain != "all" else None
         rag_engine = RagEngine.from_default_paths(
             top_k=config.rag_top_k,
             threshold=config.rag_threshold,
+            domain_filter=_domain_filter,
         )
         kb_info = rag_engine.knowledge_base.info()
         print(
@@ -2210,6 +2214,7 @@ def _config_snapshot() -> Dict[str, Any]:
         'rag_top_k': config.rag_top_k,
         'rag_threshold': config.rag_threshold,
         'rag_confidence_threshold': config.rag_confidence_threshold,
+        'rag_domain': config.rag_domain,
         'react_routing_enabled': config.react_routing_enabled,
         'react_rag_score_threshold': config.react_rag_score_threshold,
         'agent_max_iters_request': config.agent_max_iters_request,
@@ -2294,6 +2299,10 @@ async def update_config(update: ConfigUpdate):
             rag_engine.threshold = config.rag_threshold
     if update.rag_confidence_threshold is not None:
         config.rag_confidence_threshold = max(0.0, min(1.0, float(update.rag_confidence_threshold)))
+    if update.rag_domain is not None and update.rag_domain in ("all", "generic", "mcp"):
+        config.rag_domain = update.rag_domain
+        if rag_engine is not None:
+            rag_engine.domain_filter = update.rag_domain if update.rag_domain != "all" else None
     if update.react_routing_enabled is not None:
         config.react_routing_enabled = bool(update.react_routing_enabled)
     if update.react_rag_score_threshold is not None:
