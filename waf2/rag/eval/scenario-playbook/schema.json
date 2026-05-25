@@ -1,0 +1,82 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://mcp-guardrails/scenario-playbook/schema.json",
+  "title": "Scenario-Playbook record",
+  "description": "Multi-step MCP attack scenario for end-to-end evaluation. Extends M-Bench-Core multiStepAttack with platform and scenario_description.",
+  "type": "object",
+  "required": [
+    "case_id", "label", "family", "subcategory",
+    "platform", "scenario_description",
+    "steps", "expected_chain", "expected_block_step",
+    "expected_layer", "tag"
+  ],
+  "properties": {
+    "case_id": {
+      "type": "string",
+      "pattern": "^sp:(wordpress|woocommerce|supabase):[0-9]{2}$"
+    },
+    "label": { "const": "attack" },
+    "family": { "const": "call_chain" },
+    "subcategory": {
+      "type": "string",
+      "enum": [
+        "data_exfiltration",
+        "credential_theft",
+        "recon_then_exploit",
+        "supabase_lethal_trifecta",
+        "prompt_injection_to_exfil"
+      ]
+    },
+    "platform": {
+      "type": "string",
+      "enum": ["wordpress", "woocommerce", "supabase"]
+    },
+    "scenario_description": {
+      "type": "string",
+      "minLength": 10
+    },
+    "steps": {
+      "type": "array",
+      "minItems": 2,
+      "maxItems": 4,
+      "items": {
+        "type": "object",
+        "required": ["tool", "args"],
+        "properties": {
+          "tool": {
+            "type": "string",
+            "pattern": "^[a-zA-Z0-9_-]+__[a-zA-Z0-9_]+$"
+          },
+          "args": {
+            "type": "object",
+            "additionalProperties": true
+          }
+        },
+        "additionalProperties": false
+      }
+    },
+    "expected_chain": {
+      "type": "string",
+      "enum": [
+        "data_exfiltration",
+        "credential_theft",
+        "recon_then_exploit",
+        "supabase_lethal_trifecta",
+        "prompt_injection_to_exfil"
+      ]
+    },
+    "expected_block_step": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 4
+    },
+    "expected_layer": {
+      "type": "string",
+      "enum": ["waf1", "waf2", "both"],
+      "description": "'both' means WAF1 and WAF2 should each block at least one step"
+    },
+    "tag": { "type": "string", "minLength": 1 },
+    "note": { "type": "string" }
+  },
+  "additionalProperties": false
+}
