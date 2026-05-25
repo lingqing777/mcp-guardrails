@@ -69,11 +69,13 @@ class RagEngine:
         knowledge_base: KnowledgeBase,
         top_k: int = 5,
         threshold: float = 0.5,
+        domain_filter: str | None = None,
     ):
         self.embedder = embedder
         self.knowledge_base = knowledge_base
         self.top_k = top_k
         self.threshold = threshold
+        self.domain_filter = domain_filter
         self.stats = RagStats()
 
     @classmethod
@@ -84,10 +86,11 @@ class RagEngine:
         manifest_path: Path = DEFAULT_MANIFEST,
         top_k: int = 5,
         threshold: float = 0.5,
+        domain_filter: str | None = None,
     ) -> "RagEngine":
         embedder = OnnxEmbedder(model_dir)
         kb = KnowledgeBase(chroma_dir, manifest_path=manifest_path)
-        return cls(embedder, kb, top_k=top_k, threshold=threshold)
+        return cls(embedder, kb, top_k=top_k, threshold=threshold, domain_filter=domain_filter)
 
     def retrieve(self, text: str) -> list[RetrievalResult]:
         """检索与 text 最相似的 top_k 条已知攻击 (双路召回 + 阈值回退)。"""
@@ -99,14 +102,14 @@ class RagEngine:
             merged: list[RetrievalResult] = []
             # 路由1: 原始输入
             vector = self.embedder.encode_one(text)
-            merged.extend(self.knowledge_base.query(vector, top_k=self.top_k, threshold=self.threshold))
+            merged.extend(self.knowledge_base.query(vector, top_k=self.top_k, threshold=self.threshold, domain_filter=self.domain_filter))
 
             # 路由2: 仅内容段，减少 METHOD/PATH 噪声
             if "CONTENT:" in text:
                 content = text.split("CONTENT:", 1)[1].split("\nPATH:", 1)[0].strip()
                 if content:
                     vector2 = self.embedder.encode_one(content)
-                    merged.extend(self.knowledge_base.query(vector2, top_k=self.top_k, threshold=self.threshold))
+                    merged.extend(self.knowledge_base.query(vector2, top_k=self.top_k, threshold=self.threshold, domain_filter=self.domain_filter))
 
             # 去重并按 score 排序
             uniq: dict[tuple[str, str], RetrievalResult] = {}
@@ -119,7 +122,7 @@ class RagEngine:
             # 阈值回退：无结果时做低阈值兜底，优先保障有可参考上下文
             if not results:
                 fallback = max(0.35, self.threshold - 0.15)
-                results = self.knowledge_base.query(vector, top_k=self.top_k, threshold=fallback)
+                results = self.knowledge_base.query(vector, top_k=self.top_k, threshold=fallback, domain_filter=self.domain_filter)
         except Exception as exc:
             self.stats.errors += 1
             log.warning("[RagEngine] 检索失败: %s", exc)
