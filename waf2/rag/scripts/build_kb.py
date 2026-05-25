@@ -86,6 +86,7 @@ def clean_phase() -> dict:
     seen: set[str] = set()
     category_counter: Counter = Counter()
     source_counter: Counter = Counter()
+    domain_counter: Counter = Counter()
     total = 0
     dropped = 0
 
@@ -100,6 +101,7 @@ def clean_phase() -> dict:
             fh.write(json.dumps(entry.to_dict(), ensure_ascii=False) + "\n")
             category_counter[entry.category] += 1
             source_counter[entry.metadata.get("source", "unknown")] += 1
+            domain_counter[entry.metadata.get("domain", "generic")] += 1
             total += 1
 
     print(f"[build_kb] ✅ 清洗完成: {total} 条记录, 去重跳过 {dropped} 条")
@@ -116,6 +118,7 @@ def clean_phase() -> dict:
         "dropped": dropped,
         "by_category": dict(category_counter),
         "by_source": dict(source_counter),
+        "by_domain": dict(domain_counter),
     }
 
 
@@ -228,6 +231,7 @@ def write_manifest(clean_stats: dict, embed_stats: dict | None) -> None:
         "total_entries": clean_stats.get("total", 0),
         "by_category": clean_stats.get("by_category", {}),
         "by_source": clean_stats.get("by_source", {}),
+        "by_domain": clean_stats.get("by_domain", {}),
         "sources": {
             "payloadsallthethings": _git_head(RAW_DIR / "payloadsallthethings"),
             "owasp_crs": _git_head(RAW_DIR / "owasp-crs"),
