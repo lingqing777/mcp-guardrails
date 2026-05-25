@@ -23,6 +23,8 @@ class DataSourceProcessor(ABC):
 
     # 子类必须定义一个可读的来源标识 (用于 metadata.source)
     source_name: str = "unknown"
+    # 子类定义领域: "generic" (传统 Web 攻击) 或 "mcp" (AI/Agent/MCP 攻击)
+    domain: str = "generic"
 
     def __init__(self, raw_dir: Path):
         """

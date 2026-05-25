@@ -137,6 +137,7 @@ class KnowledgeEntry:
             self.metadata.setdefault(key, value)
         self.metadata.setdefault("description", "")
         self.metadata.setdefault("source", "unknown")
+        self.metadata.setdefault("domain", "generic")
         evidence_type = str(self.metadata.get("evidence_type", "attack")).lower()
         if evidence_type not in {"attack", "benign"}:
             raise ValueError("metadata.evidence_type 必须是 attack 或 benign")
