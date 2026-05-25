@@ -90,6 +90,18 @@ bash waf2/rag/scripts/run_ablation.sh --ablation all --benign-sample 100 --sampl
 bash waf2/rag/scripts/run_ablation.sh --ablation all --model llama3-8b --waf2 http://localhost:8082
 ```
 
+### Windows 协作者(无 WSL/Git Bash)
+
+用同目录下的 `run_ablation.bat`(纯 cmd,功能与 `run_ablation.sh --ablation all --benign-sample equal` 等价):
+
+```cmd
+REM 从仓库根运行,可选传入 model tag(默认 qwen3-1_5b)
+waf2\rag\scripts\run_ablation.bat qwen3-1_5b
+```
+
+依赖:Node.js 18+ / Python 3.10+ / `curl.exe`(Win10+ 内置)/ PowerShell。
+脚本会自动登录 mcp-hub、采样等量 benigns、按 1→7 顺序跑、最后 `type` 出 index.tsv。
+
 ### 输出结构
 
 ```
