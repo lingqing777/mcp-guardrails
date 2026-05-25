@@ -72,6 +72,9 @@ let config = {
   whitelist: ["*"],
   rules: RULES,
   rulesEnabled: { ...DEFAULT_RULES_ENABLED },
+  callChainEnabled: true,
+  dynamicPolicyEnabled: true,
+  rbacArgsEnabled: true,
 };
 
 // ==================== 导出 API ====================
@@ -106,6 +109,16 @@ export function updateWaf1Config(newConfig) {
 
     if (newConfig.waf1.enabled !== undefined) {
       config.enabled = newConfig.waf1.enabled;
+    }
+
+    if (newConfig.waf1.callChainEnabled !== undefined) {
+      config.callChainEnabled = !!newConfig.waf1.callChainEnabled;
+    }
+    if (newConfig.waf1.dynamicPolicyEnabled !== undefined) {
+      config.dynamicPolicyEnabled = !!newConfig.waf1.dynamicPolicyEnabled;
+    }
+    if (newConfig.waf1.rbacArgsEnabled !== undefined) {
+      config.rbacArgsEnabled = !!newConfig.waf1.rbacArgsEnabled;
     }
 
     logger.info("[WAF1] 配置已更新, rulesEnabled:", config.rulesEnabled);
@@ -244,7 +257,9 @@ export function validateToolCall(tool, args, context = {}) {
   const source = context.source || 'unknown';
 
   logger.info(`[WAF1] ── 检测请求: ${source} (${tool || 'unknown'}) ──`);
-  const chainResult = callChainTracker.check(tool, args || {}, context);
+  const chainResult = config.callChainEnabled
+    ? callChainTracker.check(tool, args || {}, context)
+    : { detected: false };
 
   // Stage -1: 速率限制
   const clientId = context.clientId || 'unknown';
@@ -265,27 +280,29 @@ export function validateToolCall(tool, args, context = {}) {
   }
 
   // Stage 0.5: args role-claim tampering (always-on, independent of RBAC config)
-  const rbacArgsResult = detectArgsRoleClaimTampering(args || {});
-  if (rbacArgsResult.tampered) {
-    stats.recordBlock('detector', 'rbac');
-    stats.addDetection({
-      tool,
-      stage: 'rbac-args',
-      category: 'rbac',
-      detector: 'rbac',
-      reason: rbacArgsResult.reason,
-    });
-    logger.warn(`[WAF1] ❌ RBAC args 篡改: ${rbacArgsResult.reason}`);
-    return {
-      allowed: false, status: 403, error: {
-        error: "WAF1 拦截",
-        reason: rbacArgsResult.reason,
-        type: "RBAC_ARGS_TAMPER",
+  if (config.rbacArgsEnabled) {
+    const rbacArgsResult = detectArgsRoleClaimTampering(args || {});
+    if (rbacArgsResult.tampered) {
+      stats.recordBlock('detector', 'rbac');
+      stats.addDetection({
+        tool,
+        stage: 'rbac-args',
         category: 'rbac',
         detector: 'rbac',
-        fields: rbacArgsResult.fields,
-      }
-    };
+        reason: rbacArgsResult.reason,
+      });
+      logger.warn(`[WAF1] ❌ RBAC args 篡改: ${rbacArgsResult.reason}`);
+      return {
+        allowed: false, status: 403, error: {
+          error: "WAF1 拦截",
+          reason: rbacArgsResult.reason,
+          type: "RBAC_ARGS_TAMPER",
+          category: 'rbac',
+          detector: 'rbac',
+          fields: rbacArgsResult.fields,
+        }
+      };
+    }
   }
 
   // Stage 1: 白名单
@@ -332,36 +349,38 @@ export function validateToolCall(tool, args, context = {}) {
   }
 
   // Stage 4: 动态策略
-  const dynamicPolicyResult = checkDynamicPolicy(tool, args || {});
-  if (!dynamicPolicyResult.allowed) {
-    stats.recordBlock('detector', dynamicPolicyResult.category || 'dynamicPolicy');
-    stats.addDetection({
-      tool,
-      stage: 'dynamic-policy',
-      category: dynamicPolicyResult.category || 'dynamicPolicy',
-      detector: 'dynamicPolicy',
-      reason: dynamicPolicyResult.reason,
-      profile: dynamicPolicyResult.profile,
-      statementType: dynamicPolicyResult.statementType,
-      severity: dynamicPolicyResult.severity,
-      direction: dynamicPolicyResult.direction,
-    });
-    logger.warn(
-      `[WAF1] ❌ 动态策略拦截 [${dynamicPolicyResult.profile || 'dynamic-policy'}]: ${dynamicPolicyResult.reason}`
-    );
-    return {
-      allowed: false,
-      status: 403,
-      error: {
-        error: "WAF1 拦截",
-        reason: dynamicPolicyResult.reason,
-        type: dynamicPolicyResult.type || 'DYNAMIC_POLICY_BLOCKED',
+  if (config.dynamicPolicyEnabled) {
+    const dynamicPolicyResult = checkDynamicPolicy(tool, args || {});
+    if (!dynamicPolicyResult.allowed) {
+      stats.recordBlock('detector', dynamicPolicyResult.category || 'dynamicPolicy');
+      stats.addDetection({
+        tool,
+        stage: 'dynamic-policy',
         category: dynamicPolicyResult.category || 'dynamicPolicy',
+        detector: 'dynamicPolicy',
+        reason: dynamicPolicyResult.reason,
         profile: dynamicPolicyResult.profile,
-        direction: dynamicPolicyResult.direction,
         statementType: dynamicPolicyResult.statementType,
-      }
-    };
+        severity: dynamicPolicyResult.severity,
+        direction: dynamicPolicyResult.direction,
+      });
+      logger.warn(
+        `[WAF1] ❌ 动态策略拦截 [${dynamicPolicyResult.profile || 'dynamic-policy'}]: ${dynamicPolicyResult.reason}`
+      );
+      return {
+        allowed: false,
+        status: 403,
+        error: {
+          error: "WAF1 拦截",
+          reason: dynamicPolicyResult.reason,
+          type: dynamicPolicyResult.type || 'DYNAMIC_POLICY_BLOCKED',
+          category: dynamicPolicyResult.category || 'dynamicPolicy',
+          profile: dynamicPolicyResult.profile,
+          direction: dynamicPolicyResult.direction,
+          statementType: dynamicPolicyResult.statementType,
+        }
+      };
+    }
   }
 
   // Stage 5: 检测器

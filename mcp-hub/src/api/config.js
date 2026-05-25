@@ -207,7 +207,7 @@ export function registerConfigRoutes(app, getConfig, setConfig, applyWaf1Config,
 
   // 更新 WAF1 配置
   app.post("/api/config/waf1", (req, res) => {
-    const { enabled, rules } = req.body;
+    const { enabled, rules, callChainEnabled, dynamicPolicyEnabled, rbacArgsEnabled } = req.body;
     const config = getConfig();
 
     if (typeof enabled === 'boolean') {
@@ -215,6 +215,15 @@ export function registerConfigRoutes(app, getConfig, setConfig, applyWaf1Config,
     }
     if (rules && typeof rules === 'object') {
       config.waf1.rules = { ...config.waf1.rules, ...rules };
+    }
+    if (callChainEnabled !== undefined) {
+      config.waf1.callChainEnabled = !!callChainEnabled;
+    }
+    if (dynamicPolicyEnabled !== undefined) {
+      config.waf1.dynamicPolicyEnabled = !!dynamicPolicyEnabled;
+    }
+    if (rbacArgsEnabled !== undefined) {
+      config.waf1.rbacArgsEnabled = !!rbacArgsEnabled;
     }
 
     setConfig(config);

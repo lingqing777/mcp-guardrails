@@ -173,6 +173,112 @@ def confusion(records: list[dict], layer: str) -> dict[str, Any]:
     }
 
 
+# ---------- TSV summary (per-run + cross-ablation index) ----------
+
+
+def active_layers(record: dict) -> list[str]:
+    """Return merged-record slot names whose latency_ms contributes to AvgTime.
+
+    Rule (matches design.md D5 + spec.md "AvgTime uses activated-layers sum"):
+      - WAF1 skipped → exclude waf1_strict, waf1_full
+      - WAF2 skipped → exclude rag_on, rag_off
+      - rag_off is only included when it carries real data (i.e. not a stub
+        from the wrapper script and not marked _skipped); harness-stub rows
+        carry `_stub: true` or `_skipped: true`
+      - rag_on is always the WAF2 primary slot when WAF2 is active
+    """
+    skipped = set(record.get("skipped_layers") or [])
+    active: list[str] = []
+    if "waf1" not in skipped:
+        active.extend(["waf1_strict", "waf1_full"])
+    if "waf2" not in skipped:
+        active.append("rag_on")
+        rag_off = record.get("rag_off") or {}
+        # Only count rag_off latency when it carries real harness data
+        if rag_off and not rag_off.get("_skipped") and not rag_off.get("_stub"):
+            active.append("rag_off")
+    return active
+
+
+def compute_avg_time_ms(records: list[dict], label: str) -> float:
+    """Mean per-case sum of activated-layers latency_ms, filtered by label."""
+    totals: list[float] = []
+    for rec in records:
+        if rec.get("label") != label:
+            continue
+        slot_total = 0.0
+        for slot in active_layers(rec):
+            layer = rec.get(slot) or {}
+            try:
+                slot_total += float(layer.get("latency_ms", 0) or 0)
+            except (TypeError, ValueError):
+                pass
+        totals.append(slot_total)
+    if not totals:
+        return 0.0
+    return sum(totals) / len(totals)
+
+
+def compute_summary_metrics(records: list[dict]) -> dict[str, float]:
+    """Return the 7 metric fields written to summary.tsv (everything except label)."""
+    families = ["char_injection", "prompt_injection_and_priv_esc", "call_chain"]
+
+    def _f1_for_family(fam: str) -> float:
+        sub = [r for r in records if r.get("family") == fam or r.get("label") == "benign"]
+        return confusion(sub, "dual")["f1"]
+
+    overall = confusion(records, "dual")
+    return {
+        "char_F1": _f1_for_family("char_injection"),
+        "pi_F1": _f1_for_family("prompt_injection_and_priv_esc"),
+        "chain_F1": _f1_for_family("call_chain"),
+        "recall": overall["recall"],
+        "F1": overall["f1"],
+        "avg_time_attacks_ms": compute_avg_time_ms(records, "attack"),
+        "avg_time_benigns_ms": compute_avg_time_ms(records, "benign"),
+    }
+
+
+def _sanitize_label(label: str) -> str:
+    """Tabs / newlines would break TSV; replace with spaces."""
+    return (label or "").replace("\t", " ").replace("\n", " ").replace("\r", " ")
+
+
+def format_summary_tsv_row(ablation_label: str, metrics: dict[str, float]) -> str:
+    """8 TAB-separated fields, no trailing newline.
+
+    Column order (matches spec waf-ablation-evaluation Requirement 'report SHALL
+    emit summary.tsv'): ablation_label, char_F1, pi_F1, chain_F1, recall, F1,
+    avg_time_attacks_ms, avg_time_benigns_ms.
+    """
+    return "\t".join([
+        _sanitize_label(ablation_label),
+        f"{metrics['char_F1']:.3f}",
+        f"{metrics['pi_F1']:.3f}",
+        f"{metrics['chain_F1']:.3f}",
+        f"{metrics['recall']:.3f}",
+        f"{metrics['F1']:.3f}",
+        f"{metrics['avg_time_attacks_ms']:.1f}",
+        f"{metrics['avg_time_benigns_ms']:.1f}",
+    ])
+
+
+def write_summary_tsv(out_dir: Path, ablation_label: str, metrics: dict[str, float]) -> Path:
+    out_path = out_dir / "summary.tsv"
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+    row = format_summary_tsv_row(ablation_label, metrics)
+    out_path.write_text(row + "\n", encoding="utf-8")
+    return out_path
+
+
+def append_to_index(index_path: Path, ablation_label: str, metrics: dict[str, float]) -> None:
+    """Append summary row to cross-ablation index.tsv (create if absent)."""
+    index_path.parent.mkdir(parents=True, exist_ok=True)
+    row = format_summary_tsv_row(ablation_label, metrics)
+    with index_path.open("a", encoding="utf-8") as fh:
+        fh.write(row + "\n")
+
+
 # ---------- table builders ----------
 
 
@@ -623,6 +729,17 @@ def main(argv: list[str] | None = None) -> int:
         "--out", required=True,
         help="output path for dual-layer-mbench-report.md",
     )
+    ap.add_argument(
+        "--ablation-label",
+        default="",
+        help="label written to summary.tsv first column (e.g. 'WAF1-only', 'Full no-chain'). "
+        "Defaults to the value found in merged JSONL records (or empty).",
+    )
+    ap.add_argument(
+        "--append-to",
+        default="",
+        help="optional path to a cross-ablation index.tsv to append this run's summary row to",
+    )
     args = ap.parse_args(argv)
 
     merged_path = Path(args.merged)
@@ -639,6 +756,26 @@ def main(argv: list[str] | None = None) -> int:
     out_path.parent.mkdir(parents=True, exist_ok=True)
     out_path.write_text(report, encoding="utf-8")
     print(f"[report-mbench] wrote {out_path}  ({len(merged)} cases)", file=sys.stderr)
+
+    # Resolve ablation label: cli > first merged record's field > empty
+    ablation_label = args.ablation_label or (merged[0].get("ablation_label") or "")
+    metrics = compute_summary_metrics(merged)
+    summary_path = write_summary_tsv(out_path.parent, ablation_label, metrics)
+    print(
+        f"[report-mbench] wrote {summary_path}  label={ablation_label!r}  "
+        f"char_F1={metrics['char_F1']:.3f} pi_F1={metrics['pi_F1']:.3f} "
+        f"chain_F1={metrics['chain_F1']:.3f} recall={metrics['recall']:.3f} "
+        f"F1={metrics['F1']:.3f} "
+        f"avgT_atk={metrics['avg_time_attacks_ms']:.1f}ms "
+        f"avgT_ben={metrics['avg_time_benigns_ms']:.1f}ms",
+        file=sys.stderr,
+    )
+
+    if args.append_to:
+        index_path = Path(args.append_to)
+        append_to_index(index_path, ablation_label, metrics)
+        print(f"[report-mbench] appended to {index_path}", file=sys.stderr)
+
     return 0
 
 

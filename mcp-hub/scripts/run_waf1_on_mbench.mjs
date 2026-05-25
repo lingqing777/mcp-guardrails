@@ -34,7 +34,7 @@ import {
   RULES,
   DEFAULT_RULES_ENABLED,
 } from '../src/waf1/rules.js';
-import { validateToolCall } from '../src/waf1/index.js';
+import { validateToolCall, updateWaf1Config } from '../src/waf1/index.js';
 
 import {
   stableCaseId,
@@ -52,13 +52,23 @@ const __dirname = dirname(__filename);
 // ---------- args ----------
 
 function parseArgs(argv) {
-  const args = { jsonl: '', variant: 'both', outDir: '' };
+  const args = {
+    jsonl: '',
+    variant: 'both',
+    outDir: '',
+    callChainEnabled: true,
+    dynamicPolicyEnabled: true,
+    rbacArgsEnabled: true,
+  };
   for (let i = 2; i < argv.length; i++) {
     const a = argv[i];
     const next = () => argv[++i];
     if (a === '--jsonl') args.jsonl = next();
     else if (a === '--variant') args.variant = next();
     else if (a === '--out-dir') args.outDir = next();
+    else if (a === '--no-call-chain') args.callChainEnabled = false;
+    else if (a === '--no-dyn-policy') args.dynamicPolicyEnabled = false;
+    else if (a === '--no-rbac-args') args.rbacArgsEnabled = false;
     else if (a === '-h' || a === '--help') {
       printHelp();
       process.exit(0);
@@ -76,7 +86,9 @@ function parseArgs(argv) {
 
 function printHelp() {
   console.error(
-    `usage: node run_waf1_on_mbench.mjs --jsonl <attacks.jsonl|benign.jsonl> --out-dir <dir> [--variant strict|full|both]`
+    `usage: node run_waf1_on_mbench.mjs --jsonl <attacks.jsonl|benign.jsonl> --out-dir <dir>\n` +
+    `       [--variant strict|full|both]\n` +
+    `       [--no-call-chain] [--no-dyn-policy] [--no-rbac-args]`
   );
 }
 
@@ -363,6 +375,19 @@ function main() {
   process.stderr.write(`[waf1-mbench] loaded ${rows.length} rows\n`);
 
   setupWaf1ForEval();
+  // Apply ablation switches AFTER setupWaf1ForEval (which also calls
+  // updateWaf1Config for rate-limit). Defaults are all-true; flags turn off.
+  updateWaf1Config({
+    waf1: {
+      callChainEnabled: args.callChainEnabled,
+      dynamicPolicyEnabled: args.dynamicPolicyEnabled,
+      rbacArgsEnabled: args.rbacArgsEnabled,
+    },
+  });
+  process.stderr.write(
+    `[waf1-mbench] switches: callChain=${args.callChainEnabled} ` +
+    `dynPolicy=${args.dynamicPolicyEnabled} rbacArgs=${args.rbacArgsEnabled}\n`
+  );
   const variants = args.variant === 'both' ? ['strict', 'full'] : [args.variant];
   for (const v of variants) {
     if (!['strict', 'full'].includes(v)) {

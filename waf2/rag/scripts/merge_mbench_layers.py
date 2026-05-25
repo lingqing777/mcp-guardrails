@@ -114,14 +114,28 @@ def merge_split(
     rag_on: list[dict],
     rag_off: list[dict],
     dataset_rows: list[dict],
+    skipped_layers: list[str] | None = None,
+    ablation_label: str = "",
 ) -> tuple[list[dict], dict[str, list[str]]]:
     """Inner-join 4 rounds + the source dataset on row index.
 
     dataset_rows is the original JSONL (attacks.jsonl or benign.jsonl) so we
     pass through source-of-truth fields (paired_with, expected_*).
 
+    skipped_layers controls ablation behavior:
+      - "waf1" in skipped_layers → WAF1 strict/full rows are NOT required;
+        per-case waf1_*.blocked treated as False; waf1_union_blocked = False;
+        dual_blocked = waf2_blocked
+      - "waf2" in skipped_layers → rag-on/rag-off rows are NOT required;
+        per-case rag_*.blocked treated as False; waf2_blocked = False;
+        dual_blocked = waf1_union_blocked
+
     Returns (merged_records, misses_by_layer).
     """
+    skipped_layers = list(skipped_layers or [])
+    skip_waf1 = "waf1" in skipped_layers
+    skip_waf2 = "waf2" in skipped_layers
+
     ws = _by_key(waf1_strict)
     wf = _by_key(waf1_full)
     ro = _by_key(rag_on)
@@ -129,36 +143,77 @@ def merge_split(
     ds = {str(i).zfill(max(4, len(str(len(dataset_rows) - 1)))): row
           for i, row in enumerate(dataset_rows)}
 
-    all_keys = set(ws) | set(wf) | set(ro) | set(rf) | set(ds)
-    common = set(ws) & set(wf) & set(ro) & set(rf) & set(ds)
+    # Common set is the inner-join of the layers that participate in this
+    # ablation, plus the dataset. Skipped layers are excluded so their absence
+    # doesn't shrink the join.
+    participating: list[set[str]] = [set(ds)]
+    if not skip_waf1:
+        participating.append(set(ws))
+        participating.append(set(wf))
+    if not skip_waf2:
+        participating.append(set(ro))
+        # rag_off is OPTIONAL even in non-skip mode (e.g. ablation 6/7 may not
+        # have run it); only require it when files exist.
+        if rf:
+            participating.append(set(rf))
+    common = set.intersection(*participating) if participating else set()
+
+    total_layer_keys: set[str] = set()
+    if not skip_waf1:
+        total_layer_keys |= set(ws) | set(wf)
+    if not skip_waf2:
+        total_layer_keys |= set(ro) | set(rf)
 
     misses = {
-        "only_strict": sorted(set(ws) - common),
-        "only_full": sorted(set(wf) - common),
-        "only_rag_on": sorted(set(ro) - common),
-        "only_rag_off": sorted(set(rf) - common),
+        "only_strict": sorted(set(ws) - common) if not skip_waf1 else [],
+        "only_full": sorted(set(wf) - common) if not skip_waf1 else [],
+        "only_rag_on": sorted(set(ro) - common) if not skip_waf2 else [],
+        "only_rag_off": sorted(set(rf) - common) if not skip_waf2 and rf else [],
         "only_dataset": sorted(set(ds) - common),
-        "missing_dataset": sorted((set(ws) | set(wf) | set(ro) | set(rf)) - set(ds)),
+        "missing_dataset": sorted(total_layer_keys - set(ds)),
     }
     misses = {k: v for k, v in misses.items() if v}
+
+    # Stub helpers — return an "all-false" layer outcome for skipped layers.
+    def _stub_layer() -> dict:
+        return {
+            "blocked": False,
+            "detected_category": "",
+            "detected_namespace": "",
+            "latency_ms": 0,
+            "blocked_at_step": None,
+        }
 
     merged: list[dict] = []
     for k in sorted(common):
         src = ds[k]
-        s = ws[k]
-        f = wf[k]
-        on = ro[k]
-        off = rf[k]
         label = src.get("label", "")
         family = src.get("family", "")
         is_multi = family == "call_chain"
 
-        # WAF1 outcomes — strict on multi-step is "not applicable" but still
-        # emitted by the harness; we honor its blocked flag for the union.
-        s_blocked = s.get("outcome") == "blocked"
-        f_blocked = f.get("outcome") == "blocked"
-        on_blocked = on.get("outcome") == "blocked"
-        off_blocked = off.get("outcome") == "blocked"
+        # WAF1 layer access
+        if skip_waf1:
+            s = {"outcome": "", "detected_category": "", "detected_namespace": "", "latency_ms": 0, "blocked_at_step": None, "chain_strict_only": False}
+            f = {"outcome": "", "detected_category": "", "detected_namespace": "", "latency_ms": 0, "blocked_at_step": None}
+            s_blocked = False
+            f_blocked = False
+        else:
+            s = ws[k]
+            f = wf[k]
+            s_blocked = s.get("outcome") == "blocked"
+            f_blocked = f.get("outcome") == "blocked"
+
+        # WAF2 layer access
+        if skip_waf2:
+            on = {"outcome": "", "detected_category": "", "detected_namespace": "", "latency_ms": 0, "waf2_evaluated_step": None}
+            off = {"outcome": "", "detected_category": "", "detected_namespace": "", "latency_ms": 0, "waf2_evaluated_step": None}
+            on_blocked = False
+            off_blocked = False
+        else:
+            on = ro[k]
+            off = rf.get(k, {"outcome": "", "detected_category": "", "detected_namespace": "", "latency_ms": 0, "waf2_evaluated_step": None, "_stub": True})
+            on_blocked = on.get("outcome") == "blocked"
+            off_blocked = off.get("outcome") == "blocked"
 
         waf1_union_blocked = s_blocked or f_blocked
         waf2_blocked = on_blocked
@@ -183,6 +238,8 @@ def merge_split(
             "expected_chain": src.get("expected_chain") if is_multi else None,
             "expected_block_step": expected_block_step,
             "is_multi_step": is_multi,
+            "ablation_label": ablation_label,
+            "skipped_layers": skipped_layers,
             "waf1_strict": {
                 "blocked": s_blocked,
                 "detected_category": s.get("detected_category", ""),
@@ -190,6 +247,7 @@ def merge_split(
                 "latency_ms": s.get("latency_ms", 0),
                 "blocked_at_step": s.get("blocked_at_step"),
                 "chain_strict_only": s.get("chain_strict_only", False),
+                **({"_skipped": True} if skip_waf1 else {}),
             },
             "waf1_full": {
                 "blocked": f_blocked,
@@ -197,6 +255,7 @@ def merge_split(
                 "detected_namespace": f.get("detected_namespace", ""),
                 "latency_ms": f.get("latency_ms", 0),
                 "blocked_at_step": f.get("blocked_at_step"),
+                **({"_skipped": True} if skip_waf1 else {}),
             },
             "rag_on": {
                 "blocked": on_blocked,
@@ -204,6 +263,7 @@ def merge_split(
                 "detected_namespace": on.get("detected_namespace", ""),
                 "latency_ms": on.get("latency_ms", 0),
                 "waf2_evaluated_step": on.get("waf2_evaluated_step"),
+                **({"_skipped": True} if skip_waf2 else {}),
             },
             "rag_off": {
                 "blocked": off_blocked,
@@ -211,12 +271,11 @@ def merge_split(
                 "detected_namespace": off.get("detected_namespace", ""),
                 "latency_ms": off.get("latency_ms", 0),
                 "waf2_evaluated_step": off.get("waf2_evaluated_step"),
+                **({"_skipped": True} if skip_waf2 else {}),
             },
-            # derived layers (used by the report aggregator)
             "waf1_union_blocked": waf1_union_blocked,
             "waf2_blocked": waf2_blocked,
             "dual_blocked": dual_blocked,
-            # confusion classification per layer
             "classification": {
                 "waf1_strict": classify_case(
                     label=label,
@@ -270,10 +329,17 @@ def merge_all_splits(
     cases_dir: Path,
     dataset_dir: Path,
     splits: list[str] = None,
+    *,
+    skipped_layers: list[str] | None = None,
+    ablation_label: str = "",
 ) -> tuple[list[dict], dict[str, dict[str, list[str]]]]:
     """Merge all (attacks + benign) splits found in cases_dir."""
     if splits is None:
         splits = ["attacks", "benign"]
+    skipped_layers = list(skipped_layers or [])
+    skip_waf1 = "waf1" in skipped_layers
+    skip_waf2 = "waf2" in skipped_layers
+
     all_merged: list[dict] = []
     all_misses: dict[str, dict[str, list[str]]] = {}
     for split in splits:
@@ -287,10 +353,10 @@ def merge_all_splits(
                   file=sys.stderr)
             continue
         # Allow each split to be present partially; missing files become empty.
-        ws_rows = _load_jsonl_optional(ws_path)
-        wf_rows = _load_jsonl_optional(wf_path)
-        on_rows = _load_jsonl_optional(on_path)
-        off_rows = _load_jsonl_optional(off_path)
+        ws_rows = _load_jsonl_optional(ws_path) if not skip_waf1 else []
+        wf_rows = _load_jsonl_optional(wf_path) if not skip_waf1 else []
+        on_rows = _load_jsonl_optional(on_path) if not skip_waf2 else []
+        off_rows = _load_jsonl_optional(off_path) if not skip_waf2 else []
         ds_rows = _load_jsonl(ds_path)
         merged, misses = merge_split(
             waf1_strict=ws_rows,
@@ -298,6 +364,8 @@ def merge_all_splits(
             rag_on=on_rows,
             rag_off=off_rows,
             dataset_rows=ds_rows,
+            skipped_layers=skipped_layers,
+            ablation_label=ablation_label,
         )
         for rec in merged:
             rec["split"] = split
@@ -327,7 +395,39 @@ def main(argv: list[str] | None = None) -> int:
         required=True,
         help="output directory for cases-mbench-merged.jsonl and merge-misses-mbench.json",
     )
+    ap.add_argument(
+        "--skip-waf1",
+        action="store_true",
+        help="WAF1-only ablation: do not require WAF1 strict/full jsonl files; "
+        "waf1_*.blocked treated as False; dual = waf2_full",
+    )
+    ap.add_argument(
+        "--skip-waf2",
+        action="store_true",
+        help="WAF2-only ablation: do not require rag-on/rag-off jsonl files; "
+        "rag_*.blocked treated as False; dual = waf1_union",
+    )
+    ap.add_argument(
+        "--ablation-label",
+        default="",
+        help="free-text label written to each merged record's ablation_label field "
+        "(e.g. 'WAF1-only', 'Full no-chain')",
+    )
     args = ap.parse_args(argv)
+
+    if args.skip_waf1 and args.skip_waf2:
+        print(
+            "[merge-mbench] error: --skip-waf1 and --skip-waf2 are mutually exclusive "
+            "(at least one layer must be evaluated)",
+            file=sys.stderr,
+        )
+        return 2
+
+    skipped_layers: list[str] = []
+    if args.skip_waf1:
+        skipped_layers.append("waf1")
+    if args.skip_waf2:
+        skipped_layers.append("waf2")
 
     cases_dir = Path(args.cases_dir)
     dataset_dir = Path(args.dataset_dir)
@@ -340,7 +440,12 @@ def main(argv: list[str] | None = None) -> int:
         return 2
     out_dir.mkdir(parents=True, exist_ok=True)
 
-    merged, misses = merge_all_splits(cases_dir, dataset_dir)
+    merged, misses = merge_all_splits(
+        cases_dir,
+        dataset_dir,
+        skipped_layers=skipped_layers,
+        ablation_label=args.ablation_label,
+    )
 
     out_path = out_dir / "cases-mbench-merged.jsonl"
     with out_path.open("w", encoding="utf-8") as fh:
@@ -350,7 +455,12 @@ def main(argv: list[str] | None = None) -> int:
     misses_path = out_dir / "merge-misses-mbench.json"
     with misses_path.open("w", encoding="utf-8") as fh:
         json.dump(
-            {"total_merged": len(merged), "misses": misses},
+            {
+                "total_merged": len(merged),
+                "skipped_layers": skipped_layers,
+                "ablation_label": args.ablation_label,
+                "misses": misses,
+            },
             fh,
             ensure_ascii=False,
             indent=2,
@@ -359,9 +469,11 @@ def main(argv: list[str] | None = None) -> int:
     unmatched_count = sum(
         len(rows) for split_misses in misses.values() for rows in split_misses.values()
     )
+    label_segment = f" ablation={args.ablation_label!r}" if args.ablation_label else ""
+    skip_segment = f" skipped={skipped_layers}" if skipped_layers else ""
     print(
-        f"[merge-mbench] joined={len(merged)} unmatched={unmatched_count} "
-        f"→ {out_path}",
+        f"[merge-mbench]{label_segment}{skip_segment} joined={len(merged)} "
+        f"unmatched={unmatched_count} → {out_path}",
         file=sys.stderr,
     )
     if unmatched_count > 0:

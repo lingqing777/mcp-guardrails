@@ -332,6 +332,106 @@ def test_end_to_end_with_files():
     print("test_end_to_end_with_files OK")
 
 
+# ---------- ablation tests: --skip-waf1 / --skip-waf2 / --ablation-label ----------
+
+
+def test_skip_waf2_only_waf1_layers_drive_dual():
+    """--skip-waf2 mode: WAF1 union determines dual; rag_*.blocked is False stub."""
+    attacks = [_attack_single(i) for i in range(2)]
+    ws = [_waf1_strict_row(i, blocked=True) for i in range(2)]
+    wf = [_waf1_full_row(i, blocked=True) for i in range(2)]
+    merged, misses = MM.merge_split(
+        waf1_strict=ws,
+        waf1_full=wf,
+        rag_on=[],
+        rag_off=[],
+        dataset_rows=attacks,
+        skipped_layers=["waf2"],
+        ablation_label="WAF1-only",
+    )
+    assert len(merged) == 2
+    assert misses == {}
+    for rec in merged:
+        assert rec["ablation_label"] == "WAF1-only"
+        assert rec["skipped_layers"] == ["waf2"]
+        assert rec["waf1_union_blocked"] is True
+        assert rec["waf2_blocked"] is False
+        assert rec["dual_blocked"] is True
+        # WAF2 nested slots become stubs with _skipped marker
+        assert rec["rag_on"]["blocked"] is False
+        assert rec["rag_on"]["_skipped"] is True
+        assert rec["rag_off"]["_skipped"] is True
+    print("test_skip_waf2_only_waf1_layers_drive_dual OK")
+
+
+def test_skip_waf1_only_waf2_drives_dual():
+    """--skip-waf1 mode: rag_on determines dual; waf1_*.blocked is False stub."""
+    attacks = [_attack_single(i) for i in range(2)]
+    on = [_waf2_row(i, "rag-on", blocked=True) for i in range(2)]
+    merged, misses = MM.merge_split(
+        waf1_strict=[],
+        waf1_full=[],
+        rag_on=on,
+        rag_off=[],
+        dataset_rows=attacks,
+        skipped_layers=["waf1"],
+        ablation_label="WAF2-only",
+    )
+    assert len(merged) == 2
+    assert misses == {}
+    for rec in merged:
+        assert rec["ablation_label"] == "WAF2-only"
+        assert rec["skipped_layers"] == ["waf1"]
+        assert rec["waf1_union_blocked"] is False
+        assert rec["waf2_blocked"] is True
+        assert rec["dual_blocked"] is True
+        # WAF1 nested slots become stubs with _skipped marker
+        assert rec["waf1_strict"]["blocked"] is False
+        assert rec["waf1_strict"]["_skipped"] is True
+        assert rec["waf1_full"]["_skipped"] is True
+    print("test_skip_waf1_only_waf2_drives_dual OK")
+
+
+def test_main_rejects_both_skip_flags_set_together():
+    """argparse-level: --skip-waf1 + --skip-waf2 returns rc 2."""
+    with tempfile.TemporaryDirectory() as td:
+        td_path = Path(td)
+        cases_dir = td_path / "cases"
+        dataset_dir = td_path / "dataset"
+        out_dir = td_path / "out"
+        cases_dir.mkdir()
+        dataset_dir.mkdir()
+        # write a minimal valid dataset so dir checks pass
+        (dataset_dir / "attacks.jsonl").write_text(
+            json.dumps(_attack_single(0)) + "\n", encoding="utf-8"
+        )
+        rc = MM.main([
+            "--cases-dir", str(cases_dir),
+            "--dataset-dir", str(dataset_dir),
+            "--out-dir", str(out_dir),
+            "--skip-waf1",
+            "--skip-waf2",
+        ])
+        assert rc == 2
+    print("test_main_rejects_both_skip_flags_set_together OK")
+
+
+def test_ablation_label_propagates_to_each_record():
+    """--ablation-label X causes every merged record to carry ablation_label=X."""
+    attacks = [_attack_single(i) for i in range(2)]
+    ws = [_waf1_strict_row(i, blocked=False) for i in range(2)]
+    wf = [_waf1_full_row(i, blocked=False) for i in range(2)]
+    on = [_waf2_row(i, "rag-on", blocked=True) for i in range(2)]
+    off = [_waf2_row(i, "rag-off", blocked=False) for i in range(2)]
+    merged, _ = MM.merge_split(
+        waf1_strict=ws, waf1_full=wf, rag_on=on, rag_off=off,
+        dataset_rows=attacks, ablation_label="Full no-chain",
+    )
+    assert all(r["ablation_label"] == "Full no-chain" for r in merged)
+    assert all(r["skipped_layers"] == [] for r in merged)
+    print("test_ablation_label_propagates_to_each_record OK")
+
+
 def main():
     test_join_key_extracts_trailing_segment()
     test_inner_join_with_complete_coverage()
@@ -344,6 +444,10 @@ def main():
     test_missing_rows_are_recorded_in_misses()
     test_paired_with_passthrough()
     test_end_to_end_with_files()
+    test_skip_waf2_only_waf1_layers_drive_dual()
+    test_skip_waf1_only_waf2_drives_dual()
+    test_main_rejects_both_skip_flags_set_together()
+    test_ablation_label_propagates_to_each_record()
     print("\nALL TESTS PASSED")
 
 

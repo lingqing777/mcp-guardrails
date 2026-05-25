@@ -222,6 +222,93 @@ def test_case_id_padding_width():
     print("test_case_id_padding_width OK")
 
 
+# ---------- compute_rounds (react-mode + rag-mode) ----------
+
+
+def test_compute_rounds_legacy_default_no_react_suffix():
+    """--rag-mode on --react-mode on (default) preserves legacy 'rag-on' slug."""
+    rounds = M.compute_rounds("on", "on")
+    assert len(rounds) == 1
+    slug, cfg = rounds[0]
+    assert slug == "rag-on"
+    assert cfg["rag_enabled"] is True
+    assert cfg["react_routing_enabled"] is True
+    assert cfg["eval_mode"] is True
+    print("test_compute_rounds_legacy_default_no_react_suffix OK")
+
+
+def test_compute_rounds_legacy_rag_both_no_react_suffix():
+    """--rag-mode both --react-mode on yields legacy 2 rounds in rag-off → rag-on order."""
+    rounds = M.compute_rounds("both", "on")
+    slugs = [s for s, _ in rounds]
+    assert slugs == ["rag-off", "rag-on"]
+    for _, cfg in rounds:
+        assert cfg["react_routing_enabled"] is True
+    print("test_compute_rounds_legacy_rag_both_no_react_suffix OK")
+
+
+def test_compute_rounds_react_off_appends_suffix():
+    """--rag-mode on --react-mode off appends '-react-off' to slug."""
+    rounds = M.compute_rounds("on", "off")
+    assert len(rounds) == 1
+    slug, cfg = rounds[0]
+    assert slug == "rag-on-react-off"
+    assert cfg["rag_enabled"] is True
+    assert cfg["react_routing_enabled"] is False
+    print("test_compute_rounds_react_off_appends_suffix OK")
+
+
+def test_compute_rounds_rag_off_react_off():
+    """--rag-mode off --react-mode off produces 'rag-off-react-off' slug."""
+    rounds = M.compute_rounds("off", "off")
+    assert len(rounds) == 1
+    slug, cfg = rounds[0]
+    assert slug == "rag-off-react-off"
+    assert cfg["rag_enabled"] is False
+    assert cfg["react_routing_enabled"] is False
+    print("test_compute_rounds_rag_off_react_off OK")
+
+
+def test_compute_rounds_react_both_yields_two_rounds_per_rag_state():
+    """--rag-mode on --react-mode both yields 2 rounds: react-on then react-off."""
+    rounds = M.compute_rounds("on", "both")
+    slugs = [s for s, _ in rounds]
+    assert slugs == ["rag-on", "rag-on-react-off"]
+    cfgs = [cfg for _, cfg in rounds]
+    assert cfgs[0]["react_routing_enabled"] is True
+    assert cfgs[1]["react_routing_enabled"] is False
+    print("test_compute_rounds_react_both_yields_two_rounds_per_rag_state OK")
+
+
+def test_compute_rounds_both_x_both_yields_four_rounds():
+    """--rag-mode both --react-mode both yields all 4 combinations."""
+    rounds = M.compute_rounds("both", "both")
+    slugs = [s for s, _ in rounds]
+    assert slugs == [
+        "rag-off",
+        "rag-off-react-off",
+        "rag-on",
+        "rag-on-react-off",
+    ]
+    print("test_compute_rounds_both_x_both_yields_four_rounds OK")
+
+
+def test_compute_rounds_config_payload_carries_both_flags():
+    """Every round's config payload MUST set both rag_enabled and react_routing_enabled."""
+    for rag_mode in ("on", "off", "both"):
+        for react_mode in ("on", "off", "both"):
+            rounds = M.compute_rounds(rag_mode, react_mode)
+            assert rounds, f"empty rounds for {rag_mode}/{react_mode}"
+            for slug, cfg in rounds:
+                assert "rag_enabled" in cfg
+                assert "react_routing_enabled" in cfg
+                assert isinstance(cfg["rag_enabled"], bool)
+                assert isinstance(cfg["react_routing_enabled"], bool)
+                # eval_mode always set so the harness mocks upstream
+                assert cfg["eval_mode"] is True
+    print("test_compute_rounds_config_payload_carries_both_flags OK")
+
+
 def main():
     test_envelope_single_step()
     test_envelope_multi_step_uses_last_step()
@@ -234,6 +321,13 @@ def main():
     test_load_mbench()
     test_build_mcp_envelope_shape()
     test_case_id_padding_width()
+    test_compute_rounds_legacy_default_no_react_suffix()
+    test_compute_rounds_legacy_rag_both_no_react_suffix()
+    test_compute_rounds_react_off_appends_suffix()
+    test_compute_rounds_rag_off_react_off()
+    test_compute_rounds_react_both_yields_two_rounds_per_rag_state()
+    test_compute_rounds_both_x_both_yields_four_rounds()
+    test_compute_rounds_config_payload_carries_both_flags()
     print("\nALL TESTS PASSED")
 
 

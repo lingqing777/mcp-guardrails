@@ -206,6 +206,45 @@ def build_record(
     return out
 
 
+# ---------- round configuration ----------
+
+
+def compute_rounds(rag_mode: str, react_mode: str) -> list[tuple[str, dict]]:
+    """Build the (round_slug, config_payload) sequence for given mode flags.
+
+    Slug naming rules (preserve legacy filenames for backward compat):
+      - react_mode == 'on'  → no suffix (e.g. "rag-on", "rag-off")
+      - react_mode == 'off' → append "-react-off" (e.g. "rag-on-react-off")
+
+    Order:
+      - rag 'both' yields [off, on] to match legacy harness behavior
+      - react 'both' yields [on, off] so the legacy-shape filename appears
+        first within each rag state (more intuitive for diffing against
+        prior runs)
+    """
+    def _states(mode: str, both_order: tuple[bool, bool]) -> list[bool]:
+        if mode == "on":
+            return [True]
+        if mode == "off":
+            return [False]
+        return list(both_order)
+
+    rounds: list[tuple[str, dict]] = []
+    for rag_enabled in _states(rag_mode, both_order=(False, True)):
+        for react_enabled in _states(react_mode, both_order=(True, False)):
+            slug = "rag-on" if rag_enabled else "rag-off"
+            if not react_enabled:
+                slug += "-react-off"
+            cfg = {
+                "rag_enabled": rag_enabled,
+                "react_routing_enabled": react_enabled,
+                "eval_mode": True,
+                "eval_fail_closed": False,
+            }
+            rounds.append((slug, cfg))
+    return rounds
+
+
 # ---------- runner ----------
 
 
@@ -261,6 +300,12 @@ def main(argv: list[str] | None = None) -> int:
         choices=["on", "off", "both"],
         default="both",
     )
+    ap.add_argument(
+        "--react-mode",
+        choices=["on", "off", "both"],
+        default="on",
+        help="control WAF2 react_routing_enabled per round (default: on)",
+    )
     ap.add_argument("--out-dir", required=True, help="output dir for cases JSONL")
     args = ap.parse_args(argv)
 
@@ -275,11 +320,7 @@ def main(argv: list[str] | None = None) -> int:
     print(f"[waf2-mbench] loaded {len(rows)} rows from {src}", file=sys.stderr)
     base_name = src.stem  # 'attacks' or 'benign'
 
-    rounds = []
-    if args.rag_mode in ("off", "both"):
-        rounds.append(("rag-off", {"rag_enabled": False, "eval_mode": True, "eval_fail_closed": False}))
-    if args.rag_mode in ("on", "both"):
-        rounds.append(("rag-on", {"rag_enabled": True, "eval_mode": True, "eval_fail_closed": False}))
+    rounds = compute_rounds(args.rag_mode, args.react_mode)
 
     for round_slug, cfg in rounds:
         _post_config(args.waf2, cfg)

@@ -361,6 +361,212 @@ def test_real_precision_in_overall_table():
     print("test_real_precision_in_overall_table OK")
 
 
+# ---------- TSV summary / AvgTime / --append-to ----------
+
+
+def _add_latency(rec: dict, *, strict: float = 2.0, full: float = 3.0,
+                 rag_on: float = 15000.0, rag_off: float = 14000.0) -> dict:
+    """Stamp latency_ms into the 4 layer slots."""
+    rec["waf1_strict"]["latency_ms"] = strict
+    rec["waf1_full"]["latency_ms"] = full
+    rec["rag_on"]["latency_ms"] = rag_on
+    rec["rag_off"]["latency_ms"] = rag_off
+    return rec
+
+
+def test_active_layers_full_mode_includes_all_four():
+    rec = _attack_record(row_index=0)
+    _add_latency(rec)
+    rec["skipped_layers"] = []
+    layers = R.active_layers(rec)
+    assert "waf1_strict" in layers
+    assert "waf1_full" in layers
+    assert "rag_on" in layers
+    assert "rag_off" in layers  # rag_off has real latency, not stub
+    print("test_active_layers_full_mode_includes_all_four OK")
+
+
+def test_active_layers_waf2_skipped_excludes_rag_slots():
+    rec = _attack_record(row_index=0)
+    _add_latency(rec)
+    rec["skipped_layers"] = ["waf2"]
+    rec["rag_on"]["_skipped"] = True
+    rec["rag_off"]["_skipped"] = True
+    layers = R.active_layers(rec)
+    assert layers == ["waf1_strict", "waf1_full"]
+    print("test_active_layers_waf2_skipped_excludes_rag_slots OK")
+
+
+def test_active_layers_waf1_skipped_only_rag_on():
+    rec = _attack_record(row_index=0)
+    _add_latency(rec)
+    rec["skipped_layers"] = ["waf1"]
+    rec["waf1_strict"]["_skipped"] = True
+    rec["waf1_full"]["_skipped"] = True
+    # Configuration 2 (WAF2-only) doesn't write rag_off — make it a stub
+    rec["rag_off"]["_stub"] = True
+    layers = R.active_layers(rec)
+    assert layers == ["rag_on"]
+    print("test_active_layers_waf1_skipped_only_rag_on OK")
+
+
+def test_compute_avg_time_attacks_only_full_mode():
+    """AvgTime sums all 4 active layers per attack case, then averages."""
+    records = []
+    for i in range(3):
+        rec = _attack_record(row_index=i)
+        # Latencies: strict=2, full=3, rag_on=15000, rag_off=14000 → total 29005
+        _add_latency(rec)
+        rec["skipped_layers"] = []
+        records.append(rec)
+    # Benigns with different latencies — should NOT pollute attack average
+    for i in range(2):
+        rec = _benign_record(row_index=100 + i)
+        _add_latency(rec, strict=99, full=99, rag_on=99, rag_off=99)
+        rec["skipped_layers"] = []
+        records.append(rec)
+    attacks_avg = R.compute_avg_time_ms(records, "attack")
+    benigns_avg = R.compute_avg_time_ms(records, "benign")
+    assert abs(attacks_avg - 29005.0) < 1e-3, f"attacks: {attacks_avg}"
+    assert abs(benigns_avg - 396.0) < 1e-3, f"benigns: {benigns_avg}"
+    print("test_compute_avg_time_attacks_only_full_mode OK")
+
+
+def test_compute_avg_time_waf1_only_excludes_waf2_latency():
+    """In WAF1-only ablation, rag_on/rag_off latency MUST NOT count."""
+    records = []
+    for i in range(2):
+        rec = _attack_record(row_index=i)
+        _add_latency(rec)  # rag_on=15000 should be ignored
+        rec["skipped_layers"] = ["waf2"]
+        rec["rag_on"]["_skipped"] = True
+        rec["rag_off"]["_skipped"] = True
+        records.append(rec)
+    # Only waf1_strict (2) + waf1_full (3) = 5 ms per case
+    avg = R.compute_avg_time_ms(records, "attack")
+    assert abs(avg - 5.0) < 1e-3, f"got {avg}"
+    print("test_compute_avg_time_waf1_only_excludes_waf2_latency OK")
+
+
+def test_format_summary_tsv_row_eight_fields():
+    metrics = {
+        "char_F1": 0.98,
+        "pi_F1": 0.78,
+        "chain_F1": 0.74,
+        "recall": 0.833,
+        "F1": 0.702,
+        "avg_time_attacks_ms": 15005.5,
+        "avg_time_benigns_ms": 20480.0,
+    }
+    row = R.format_summary_tsv_row("Full no-chain", metrics)
+    fields = row.split("\t")
+    assert len(fields) == 8
+    assert fields[0] == "Full no-chain"
+    assert fields[1] == "0.980"
+    assert fields[2] == "0.780"
+    assert fields[3] == "0.740"
+    assert fields[4] == "0.833"
+    assert fields[5] == "0.702"
+    assert fields[6] == "15005.5"
+    assert fields[7] == "20480.0"
+    # No trailing newline in formatter — write_summary_tsv adds it
+    assert not row.endswith("\n")
+    print("test_format_summary_tsv_row_eight_fields OK")
+
+
+def test_format_summary_tsv_label_sanitization():
+    """Tabs / newlines in label MUST be replaced (would break TSV columns)."""
+    metrics = {k: 0.0 for k in ["char_F1", "pi_F1", "chain_F1", "recall",
+                                "F1", "avg_time_attacks_ms", "avg_time_benigns_ms"]}
+    row = R.format_summary_tsv_row("bad\tlabel\nhere", metrics)
+    fields = row.split("\t")
+    assert len(fields) == 8
+    assert fields[0] == "bad label here"
+    print("test_format_summary_tsv_label_sanitization OK")
+
+
+def test_write_summary_tsv_file_has_one_line_eight_fields():
+    with tempfile.TemporaryDirectory() as td:
+        out_dir = Path(td)
+        metrics = {k: 0.5 for k in ["char_F1", "pi_F1", "chain_F1", "recall",
+                                    "F1", "avg_time_attacks_ms", "avg_time_benigns_ms"]}
+        path = R.write_summary_tsv(out_dir, "Full", metrics)
+        assert path.exists()
+        content = path.read_text(encoding="utf-8")
+        assert content.endswith("\n")
+        lines = [ln for ln in content.split("\n") if ln]
+        assert len(lines) == 1
+        assert len(lines[0].split("\t")) == 8
+        assert lines[0].split("\t")[0] == "Full"
+    print("test_write_summary_tsv_file_has_one_line_eight_fields OK")
+
+
+def test_append_to_index_accumulates_lines():
+    with tempfile.TemporaryDirectory() as td:
+        index_path = Path(td) / "subdir" / "index.tsv"
+        metrics_a = {k: 0.5 for k in ["char_F1", "pi_F1", "chain_F1", "recall",
+                                      "F1", "avg_time_attacks_ms", "avg_time_benigns_ms"]}
+        metrics_b = {**metrics_a, "recall": 0.7}
+        R.append_to_index(index_path, "WAF1-only", metrics_a)
+        R.append_to_index(index_path, "Full", metrics_b)
+        R.append_to_index(index_path, "Full no-chain", metrics_a)
+        assert index_path.exists()
+        lines = [ln for ln in index_path.read_text("utf-8").split("\n") if ln]
+        assert len(lines) == 3
+        assert lines[0].split("\t")[0] == "WAF1-only"
+        assert lines[1].split("\t")[0] == "Full"
+        assert lines[2].split("\t")[0] == "Full no-chain"
+        # second line carries the differing recall (0.700)
+        assert lines[1].split("\t")[4] == "0.700"
+    print("test_append_to_index_accumulates_lines OK")
+
+
+def test_summary_metrics_with_real_records():
+    """Smoke test: compute_summary_metrics returns all 7 fields with sane values."""
+    records = []
+    # 5 char_injection TP, 3 pi FN, 4 chain TP
+    for i in range(5):
+        rec = _attack_record(row_index=i, family="char_injection",
+                             classification=_classification({"dual": "TP"}))
+        _add_latency(rec)
+        records.append(rec)
+    for i in range(3):
+        rec = _attack_record(row_index=10 + i,
+                             family="prompt_injection_and_priv_esc",
+                             classification=_classification({"dual": "FN"}))
+        _add_latency(rec)
+        records.append(rec)
+    for i in range(4):
+        rec = _attack_record(row_index=20 + i, family="call_chain",
+                             classification=_classification({"dual": "TP"}))
+        _add_latency(rec)
+        records.append(rec)
+    # Some benigns (all TN by default) so FPR has a denominator
+    for i in range(10):
+        rec = _benign_record(row_index=100 + i,
+                             classification=_classification({"dual": "TN"}))
+        _add_latency(rec, rag_on=10000, rag_off=9000)
+        records.append(rec)
+    metrics = R.compute_summary_metrics(records)
+    assert set(metrics.keys()) == {
+        "char_F1", "pi_F1", "chain_F1", "recall", "F1",
+        "avg_time_attacks_ms", "avg_time_benigns_ms",
+    }
+    # char: 5 TP, 0 FN, 0 FP, 10 TN → F1=1.0
+    assert abs(metrics["char_F1"] - 1.0) < 1e-6
+    # pi: 0 TP, 3 FN, 0 FP, 10 TN → F1=0
+    assert abs(metrics["pi_F1"] - 0.0) < 1e-6
+    # chain: 4 TP, 0 FN, 0 FP, 10 TN → F1=1.0
+    assert abs(metrics["chain_F1"] - 1.0) < 1e-6
+    # overall recall: 9/12
+    assert abs(metrics["recall"] - 9 / 12) < 1e-6
+    # AvgTime attacks = 2 + 3 + 15000 + 14000 = 29005
+    assert abs(metrics["avg_time_attacks_ms"] - 29005.0) < 1e-3
+    # AvgTime benigns = 2 + 3 + 10000 + 9000 = 19005
+    assert abs(metrics["avg_time_benigns_ms"] - 19005.0) < 1e-3
+    print("test_summary_metrics_with_real_records OK")
+
+
 def main():
     test_tool_universe_real_vs_synthetic()
     test_confusion_arithmetic()
@@ -370,6 +576,16 @@ def main():
     test_per_subcategory_sorted_by_count_desc()
     test_render_report_has_all_six_tables()
     test_real_precision_in_overall_table()
+    test_active_layers_full_mode_includes_all_four()
+    test_active_layers_waf2_skipped_excludes_rag_slots()
+    test_active_layers_waf1_skipped_only_rag_on()
+    test_compute_avg_time_attacks_only_full_mode()
+    test_compute_avg_time_waf1_only_excludes_waf2_latency()
+    test_format_summary_tsv_row_eight_fields()
+    test_format_summary_tsv_label_sanitization()
+    test_write_summary_tsv_file_has_one_line_eight_fields()
+    test_append_to_index_accumulates_lines()
+    test_summary_metrics_with_real_records()
     print("\nALL TESTS PASSED")
 
 
