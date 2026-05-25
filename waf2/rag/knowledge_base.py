@@ -107,19 +107,32 @@ class KnowledgeBase:
         return self._info
 
     def query(
-        self, vector: np.ndarray, top_k: int = 5, threshold: float = 0.5
+        self,
+        vector: np.ndarray,
+        top_k: int = 5,
+        threshold: float = 0.5,
+        domain_filter: str | None = None,
     ) -> list[RetrievalResult]:
-        """根据向量查询 top-k 相似记录, 过滤相似度 < threshold 的结果"""
+        """根据向量查询 top-k 相似记录, 过滤相似度 < threshold 的结果。
+
+        domain_filter: None = 不过滤 (返回所有 domain)
+                       "generic" = 只返回传统 Web 攻击知识
+                       "mcp" = 只返回 AI/Agent/MCP 攻击知识
+        """
         if vector.ndim == 1:
             query_embedding = vector.astype(np.float32).tolist()
         else:
             query_embedding = vector.astype(np.float32).squeeze().tolist()
 
-        results = self._collection.query(
-            query_embeddings=[query_embedding],
-            n_results=top_k,
-            include=["documents", "metadatas", "distances"],
-        )
+        kwargs: dict[str, Any] = {
+            "query_embeddings": [query_embedding],
+            "n_results": top_k,
+            "include": ["documents", "metadatas", "distances"],
+        }
+        if domain_filter and domain_filter in ("generic", "mcp"):
+            kwargs["where"] = {"domain": domain_filter}
+
+        results = self._collection.query(**kwargs)
 
         ids = (results.get("ids") or [[]])[0]
         docs = (results.get("documents") or [[]])[0]
