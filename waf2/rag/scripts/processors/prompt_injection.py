@@ -341,6 +341,7 @@ class PromptInjectionProcessor(DataSourceProcessor):
                 category="prompt_injection",
                 metadata={
                     "source": self.source_name,
+                    "domain": self.domain,
                     "subcategory": subcategory,
                     "description": f"{subcategory} payload ({label})",
                 },
@@ -365,6 +366,7 @@ class PromptInjectionProcessor(DataSourceProcessor):
                     category="prompt_injection",
                     metadata={
                         "source": "PromptInjection-UserFile",
+                        "domain": self.domain,
                         "subcategory": "user_provided",
                         "description": f"User-provided prompt injection from {txt_file.name}",
                     },
@@ -392,6 +394,7 @@ class PromptInjectionProcessor(DataSourceProcessor):
                     category="prompt_injection",
                     metadata={
                         "source": "PromptInjection-UserFile",
+                        "domain": self.domain,
                         "subcategory": "user_provided",
                         "description": f"User-provided prompt injection from {md_file.name}",
                     },

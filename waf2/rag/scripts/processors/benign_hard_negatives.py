@@ -47,6 +47,7 @@ class BenignHardNegativeProcessor(DataSourceProcessor):
             category = str(row.get("category") or "unknown")
             metadata = dict(row.get("metadata") or {})
             metadata.setdefault("source", self.source_name)
+            metadata.setdefault("domain", self.domain)
             metadata.setdefault("description", row.get("description", "Benign hard-negative example"))
             metadata["evidence_type"] = "benign"
             if row.get("tag"):

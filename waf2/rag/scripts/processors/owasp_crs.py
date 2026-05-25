@@ -168,6 +168,7 @@ class OwaspCrsProcessor(DataSourceProcessor):
                         category=category,
                         metadata={
                             "source": self.source_name,
+                            "domain": self.domain,
                             "description": description,
                         },
                     )

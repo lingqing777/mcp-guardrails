@@ -128,6 +128,7 @@ class PayloadsAllTheThingsProcessor(DataSourceProcessor):
                     category=category,
                     metadata={
                         "source": self.source_name,
+                        "domain": self.domain,
                         "description": f"{attack_name} payload from {txt_file.name}",
                     },
                 )
@@ -158,6 +159,7 @@ class PayloadsAllTheThingsProcessor(DataSourceProcessor):
                 category=category,
                 metadata={
                     "source": self.source_name,
+                    "domain": self.domain,
                     "description": f"{attack_name} example from README",
                 },
             )
