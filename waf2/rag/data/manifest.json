@@ -1,29 +1,27 @@
 {
   "version": "0.1.0",
-  "built_at": "2026-04-30T11:18:32Z",
-  "total_entries": 3364,
+  "built_at": "2026-05-25T14:22:26Z",
+  "total_entries": 198,
   "by_category": {
-    "sensitive_data_exposure": 50,
-    "authentication_bypass": 235,
-    "xss": 296,
-    "command_injection": 286,
-    "path_traversal": 694,
-    "sql_injection": 1216,
-    "prompt_injection": 213,
-    "data_exfiltration": 55,
-    "ssrf": 108,
-    "xxe": 210,
+    "prompt_injection": 190,
+    "xss": 1,
+    "sql_injection": 2,
+    "sensitive_data_exposure": 1,
+    "command_injection": 1,
+    "ssrf": 1,
+    "path_traversal": 1,
     "insecure_deserialization": 1
   },
   "by_source": {
-    "PayloadsAllTheThings": 2924,
-    "OWASP-CRS": 242,
     "AI-Agent-Attacks": 188,
     "WAF2-Benign-Hard-Negatives": 10
   },
+  "by_domain": {
+    "mcp": 198
+  },
   "sources": {
-    "payloadsallthethings": "3b069f03347d",
-    "owasp_crs": "414284ab424c"
+    "payloadsallthethings": "unknown",
+    "owasp_crs": "unknown"
   },
   "embedding_model": "sentence-transformers/all-MiniLM-L6-v2",
   "vector_dim": 384,
