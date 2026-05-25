@@ -82,6 +82,7 @@ PER_FILE_LIMIT = 150
 
 class PayloadsAllTheThingsProcessor(DataSourceProcessor):
     source_name = "PayloadsAllTheThings"
+    domain = "generic"
 
     def process(self) -> Iterator[KnowledgeEntry]:
         if not self.is_available():

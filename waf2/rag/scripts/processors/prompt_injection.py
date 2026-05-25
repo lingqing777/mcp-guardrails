@@ -331,6 +331,7 @@ class PromptInjectionProcessor(DataSourceProcessor):
     """Prompt Injection + MCP/Agent 特有攻击的知识库生成器"""
 
     source_name = "AI-Agent-Attacks"
+    domain = "mcp"
 
     def process(self) -> Iterator[KnowledgeEntry]:
         # 1. 内置分类种子 payload (覆盖 7 大类)

@@ -14,6 +14,7 @@ class BenignHardNegativeProcessor(DataSourceProcessor):
     """Load local benign examples that may resemble attacks but should not block."""
 
     source_name = "WAF2-Benign-Hard-Negatives"
+    domain = "mcp"
 
     def __init__(self, jsonl_file: Path):
         super().__init__(jsonl_file.parent)

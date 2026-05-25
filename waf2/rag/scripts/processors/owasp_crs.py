@@ -105,6 +105,7 @@ def _classify(block: str, filename: str) -> str:
 
 class OwaspCrsProcessor(DataSourceProcessor):
     source_name = "OWASP-CRS"
+    domain = "generic"
 
     def process(self) -> Iterator[KnowledgeEntry]:
         if not self.is_available():
