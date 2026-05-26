@@ -38,12 +38,21 @@ export const RULES = {
   ],
 
   // 3. 敏感文件访问
+  //
+  // 关键边界:`/etc/passwd` 后跟 `-` 或 `_` 是不同文件
+  // (例 `passwd-format-explanation.md`, `passwd_backup`),用负向先行断言
+  // `(?![-_a-z0-9])` 排除这类延续标识符的场景。Lookahead 不消费字符,所以
+  // 仍然能匹配 `/etc/passwd"`, `/etc/passwd ` 等真实路径用法。
   sensitiveFiles: [
-    /\/etc\/passwd/i,
-    /\/etc\/shadow/i,
+    /\/etc\/passwd(?![-_a-z0-9])/i,
+    /\/etc\/shadow(?![-_a-z0-9])/i,
+    /\/etc\/sudoers(?![-_a-z0-9])/i,
     /\.ssh\//i,
     /\.env\b/i,
-    /id_rsa/i,
+    /\bid_rsa(?![-_a-z0-9])/i,
+    /\bid_dsa(?![-_a-z0-9])/i,
+    /\bid_ecdsa(?![-_a-z0-9])/i,
+    /\bid_ed25519(?![-_a-z0-9])/i,
     /\.aws\//i,
     /\.git\//i,
     /\.bashrc/i,
@@ -66,6 +75,9 @@ export const RULES = {
     /\/var\/run\/secrets\/kubernetes\.io\//i,
     /\.keys\/[a-z0-9_\-.]+/i,
     /\/var\/log\/auth\.log\b/i,
+    // GPG private key store (回归补丁:chain credential_theft step 1 路径覆盖)
+    /\.gnupg\//i,
+    /private-keys-v1\.d/i,
   ],
 
   // 4. Prompt Injection / Tool Poisoning
@@ -94,6 +106,17 @@ export const RULES = {
     /system\s+notice\s*:/i,
     />>>[\s\S]{0,200}(system|notice|tool|directive|important)[\s\S]{0,200}<<</i,
     /future\s+tools\s+(should|must|will)/i,
+    // J. Indirect prompt injection in stored content (descriptions, comments, etc.) —
+    //   回归补丁:这些原本只靠 fuzzy 误打 `description` key 拦下,P0 修复后需要精准模式。
+    //   分隔符兼容三种形式:行首 / 真实换行 / 字面 `\n` 字符串(JSON-escaped)
+    /<!--\s*(?:assistant|system|user|role)\s*:/i,
+    /(?:^|[\r\n]|\\n)\s*#{2,}\s*(?:role|system|assistant|user)\s*[:=]/i,
+    /\[\s*end\s+of\s+[a-z][a-z\s]{0,30}\s*\]/i,
+    /(?:^|[\r\n]|\\n)\s*new\s+(?:instruction|directive|rule)s?\s*[:.]/i,
+    /\[\s*(?:tool\s+override|system\s+override|admin\s+mode|sudo\s+mode|root\s+access)\s*\]/i,
+    /\bbefore\s+calling\s+(?:any\s+|the\s+|each\s+|every\s+)?(?:tool|function|api|mcp)\b/i,
+    /\b(?:always|never)\s+include\s+(?:the\s+)?(?:user'?s?\s+|my\s+)?(?:github|api|access|session|auth|bearer|oauth)[\s_]*(?:token|key|cookie|credential|secret)/i,
+    /\bignore\s+(?:all\s+)?(?:prior|previous|preceding|above|earlier)\s+(?:rules|instructions|prompts?|directives|messages|context)\b/i,
   ],
 
   // 5. 数据泄露

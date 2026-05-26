@@ -51,13 +51,17 @@ function normalizeText(text) {
 }
 
 // 模糊攻击模式
+//
+// 注:`/etc/passwd` / `/etc/shadow` 等路径类模式已从 fuzzy 移除 — 这些应由
+// `rules.sensitiveFiles` 的边界锚定正则负责。fuzzy 不做单词边界检查,会把
+// `/etc/passwd-format-explanation.md` 这种合法子串也命中,造成 FP。
+// 真实 l33t 变体(`/3tc/p4sswd`)会先经 normalizeText 还原成 `/etc/passwd`,
+// 再被精确正则匹配,无需在 fuzzy 中重复。
 const FUZZY_ATTACK_PATTERNS = [
   { pattern: 'drop table', category: 'sqlInjection', threshold: 3 },
   { pattern: 'union select', category: 'sqlInjection', threshold: 3 },
   { pattern: 'delete from', category: 'sqlInjection', threshold: 3 },
   { pattern: 'insert into', category: 'sqlInjection', threshold: 3 },
-  { pattern: '/etc/passwd', category: 'sensitiveFiles', threshold: 2 },
-  { pattern: '/etc/shadow', category: 'sensitiveFiles', threshold: 2 },
   { pattern: 'rm -rf', category: 'shellInjection', threshold: 2 },
   { pattern: 'curl | bash', category: 'shellInjection', threshold: 3 },
   { pattern: '<script>', category: 'xss', threshold: 2 },

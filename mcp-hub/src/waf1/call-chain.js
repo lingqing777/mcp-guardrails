@@ -21,6 +21,9 @@ const DANGEROUS_CHAINS = [
       { match: (call) => {
         const t = String(call.tool || '');
         if (/send|post|upload|write|push|forward/i.test(t)) return true;
+        // 外发渠道:Github gist / pastebin / snippet / webhook / S3 等也是 exfil 通道
+        if (/gist|paste|snippet|webhook|bucket\b|s3_/i.test(t)) return true;
+        if (/(^|__)create_(?:gist|paste|snippet|repository|repo|issue|comment|file)/i.test(t)) return true;
         if (/http_request|http_post|http-client|webhook|fetch_url|request_url/i.test(t)) {
           const a = call.args || {};
           const method = String(a.method || '').toUpperCase();
@@ -36,11 +39,16 @@ const DANGEROUS_CHAINS = [
     steps: [
       { match: (call) => {
         const s = JSON.stringify(call.args);
-        return /password|secret|key|token|credential|\.env|\.ssh|id_rsa/i.test(s);
+        return /password|secret|key|token|credential|\.env|\.ssh|id_rsa|\.gnupg|private-keys/i.test(s);
       }},
       { match: (call) => {
+        const t = String(call.tool || '');
         const s = JSON.stringify(call.args);
-        return /https?:\/\/|curl|wget|fetch|request/i.test(s);
+        if (/https?:\/\/|curl|wget|fetch|request/i.test(s)) return true;
+        // 外发渠道(同 data_exfiltration step 2)
+        if (/gist|paste|snippet|webhook|bucket\b|s3_/i.test(t)) return true;
+        if (/(^|__)create_(?:gist|paste|snippet|repository|repo|issue|comment|file)/i.test(t)) return true;
+        return false;
       }},
     ],
   },

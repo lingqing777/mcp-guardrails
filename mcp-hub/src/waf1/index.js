@@ -26,6 +26,7 @@ import { checkDynamicPolicy } from './dynamic-policy.js';
 import { RateLimiter } from './rate-limit.js';
 import { RBACController, detectArgsRoleClaimTampering } from './rbac.js';
 import { StatsCollector } from './stats.js';
+import { extractArgValues } from './utils.js';
 
 // ==================== 缓存 ====================
 
@@ -169,28 +170,57 @@ export function resetWaf1State() {
 
 // ==================== 检测管线 ====================
 
+/**
+ * PII 检测器在合法收件人/客户邮箱字段上的工具感知白名单。
+ * 这些工具的命名字段本身就是邮箱(发邮件、注册客户等),不该当 PII 泄露拦截。
+ * 字段名是 args 顶层 key;嵌套字段当前不支持(M-Bench-Core 工具都是平 schema)。
+ */
+const PII_FIELD_WHITELIST = {
+  'mail__send':                    ['to', 'from', 'cc', 'bcc', 'reply_to'],
+  'mail__forward':                 ['to', 'from', 'cc', 'bcc'],
+  'notification__send':            ['to', 'recipient', 'recipients'],
+  'woocommerce__create_customer':  ['email'],
+  'woocommerce__update_customer':  ['email'],
+};
+
+function applyPIIWhitelist(tool, args) {
+  if (!args || typeof args !== 'object' || Array.isArray(args)) return args;
+  const skip = PII_FIELD_WHITELIST[tool];
+  if (!skip || skip.length === 0) return args;
+  const clone = { ...args };
+  for (const f of skip) delete clone[f];
+  return clone;
+}
+
 function runDetectors(tool, args, chainResult = { detected: false }) {
-  const argsStr = JSON.stringify(args);
+  // 输入剥离:fuzzy / secrets / unicode 仅扫描 args 的值,不扫描 JSON 字段名。
+  // 这避免了 `<script>` (threshold=2) 误匹配 `description` 等英文 key
+  // (`escripti` 与 `<script>` Levenshtein 距离恰好 = 2)。
+  // PII 走单独的工具感知白名单路径(见下文)。
+  const argsValuesStr = extractArgValues(args);
   const results = [];
 
   // 1. Secrets 检测
-  const secretMatches = detectSecrets(argsStr, cache);
+  const secretMatches = detectSecrets(argsValuesStr, cache);
   if (secretMatches.length > 0) {
     stats.recordBlock('detector', 'secrets');
     results.push({
       detector: 'secrets',
+      category: 'secrets',
       allowed: false,
       reason: `检测到凭证泄露: ${secretMatches.map(m => m.type).join(', ')}`,
       matches: secretMatches,
     });
   }
 
-  // 2. PII 检测
-  const piiMatches = detectPII(argsStr, cache);
+  // 2. PII 检测(工具感知白名单 — D3 in design.md)
+  const piiText = extractArgValues(applyPIIWhitelist(tool, args));
+  const piiMatches = detectPII(piiText, cache);
   if (piiMatches.length > 0) {
     stats.recordBlock('detector', 'pii');
     results.push({
       detector: 'pii',
+      category: 'pii',
       allowed: false,
       reason: `检测到 PII 泄露: ${piiMatches.map(m => m.type).join(', ')}`,
       matches: piiMatches,
@@ -198,11 +228,12 @@ function runDetectors(tool, args, chainResult = { detected: false }) {
   }
 
   // 3. Unicode 异常检测
-  const unicodeAnomalies = detectUnicodeAnomalies(argsStr, cache);
+  const unicodeAnomalies = detectUnicodeAnomalies(argsValuesStr, cache);
   if (unicodeAnomalies.length > 2) {
     stats.recordBlock('detector', 'unicode');
     results.push({
       detector: 'unicode',
+      category: 'unicode',
       allowed: false,
       reason: `检测到 Unicode 异常字符 (${unicodeAnomalies.length}个): 可能的 Prompt Injection 绕过`,
       matches: unicodeAnomalies,
@@ -210,11 +241,14 @@ function runDetectors(tool, args, chainResult = { detected: false }) {
   }
 
   // 4. 模糊匹配检测
-  const fuzzyMatches = detectFuzzyAttacks(argsStr, cache);
+  const fuzzyMatches = detectFuzzyAttacks(argsValuesStr, cache);
   if (fuzzyMatches.length > 0) {
     stats.recordBlock('detector', 'fuzzy');
+    // category 优先取 fuzzy pattern 自身的 category(如 xss),便于下游分类
+    const primaryCat = (fuzzyMatches[0] && fuzzyMatches[0].category) || 'fuzzy';
     results.push({
       detector: 'fuzzy',
+      category: primaryCat,
       allowed: false,
       reason: `检测到混淆攻击: ${fuzzyMatches.map(m => `${m.pattern}(距离=${m.distance})`).join(', ')}`,
       matches: fuzzyMatches,
@@ -407,6 +441,7 @@ export function validateToolCall(tool, args, context = {}) {
         error: "WAF1 拦截",
         reason: primary.reason,
         type: "DETECTOR_BLOCKED",
+        category: primary.category || primary.detector,
         detector: primary.detector,
         allDetections: blocked.map(b => ({ detector: b.detector, reason: b.reason })),
       }

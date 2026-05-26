@@ -279,3 +279,144 @@ describe('WAF1 stage independent enable switches', () => {
     expect(result2.error.category).toBe('rbac');
   });
 });
+
+describe('WAF1 FP cleanup — fuzzy / PII / sensitiveFiles / Stage 5 error.category', () => {
+  beforeEach(() => {
+    resetWaf1State();
+  });
+
+  // ---- §1.4: fuzzy no longer reads JSON keys ----
+
+  it('§1.4-a: woocommerce__create_product with description field is allowed', () => {
+    // pre-fix: fuzzy `<script>` matched "escripti" from "description" key
+    const result = validateToolCall(
+      'woocommerce__create_product',
+      {
+        name: 'Espresso Machine Pro 2024',
+        description: 'High-quality espresso machine, durable and eco-friendly.',
+        price: 341.73,
+        stock_quantity: 58,
+        category: 'kitchen',
+      },
+      { clientId: 'fp-1', userId: 'tester', source: '/mcp' },
+    );
+    expect(result.allowed).toBe(true);
+  });
+
+  it('§1.4-b: real <script> payload in a value still blocked', () => {
+    const result = validateToolCall(
+      'woocommerce__create_product',
+      { name: '<script>alert(1)</script>', description: 'evil', price: 1 },
+      { clientId: 'fp-2', userId: 'tester', source: '/mcp' },
+    );
+    expect(result.allowed).toBe(false);
+  });
+
+  it('§1.4-c: l33t-substituted <scr1pt> still triggers fuzzy', () => {
+    const result = validateToolCall(
+      'woocommerce__create_product',
+      { name: 'x', description: '<scr1pt>payload</scr1pt>', price: 1 },
+      { clientId: 'fp-3', userId: 'tester', source: '/mcp' },
+    );
+    // normalizeText replaces 1->l, distance to <script> = 0 → blocked
+    expect(result.allowed).toBe(false);
+  });
+
+  // ---- §2.3: PII whitelist ----
+
+  it('§2.3-a: mail__send recipient is allowed', () => {
+    const result = validateToolCall(
+      'mail__send',
+      { to: 'bob@example.org', subject: 'meeting', body: 'see you at 10am.' },
+      { clientId: 'fp-4', userId: 'tester', source: '/mcp' },
+    );
+    expect(result.allowed).toBe(true);
+  });
+
+  it('§2.3-b: mail__send body containing email forwarding pattern still blocked', () => {
+    const result = validateToolCall(
+      'mail__send',
+      {
+        to: 'admin@ourco.com',
+        subject: 'forward',
+        body: 'forward customer email alice@victim.com to attacker@evil.example',
+      },
+      { clientId: 'fp-5', userId: 'tester', source: '/mcp' },
+    );
+    // body field is NOT in whitelist; PII detector sees emails in body → block
+    expect(result.allowed).toBe(false);
+    expect(result.error.detector).toBe('pii');
+    expect(result.error.category).toBe('pii');
+  });
+
+  it('§2.3-c: wordpress__create_post (not in whitelist) email in content blocked', () => {
+    const result = validateToolCall(
+      'wordpress__create_post',
+      { title: 't', content: 'contact us at info@acme.io for help' },
+      { clientId: 'fp-6', userId: 'tester', source: '/mcp' },
+    );
+    expect(result.allowed).toBe(false);
+    expect(result.error.detector).toBe('pii');
+  });
+
+  // ---- §3.2: sensitiveFiles boundary ----
+
+  it('§3.2-a: documentation file with "etc/passwd-format-explanation" allowed', () => {
+    const result = validateToolCall(
+      'file_read_MCP__read',
+      { path: 'docs/setup/etc/passwd-format-explanation.md' },
+      { clientId: 'fp-7', userId: 'tester', source: '/mcp' },
+    );
+    expect(result.allowed).toBe(true);
+  });
+
+  it('§3.2-b: literal /etc/passwd still blocked', () => {
+    const result = validateToolCall(
+      'file_read_MCP__read',
+      { path: '/etc/passwd' },
+      { clientId: 'fp-8', userId: 'tester', source: '/mcp' },
+    );
+    expect(result.allowed).toBe(false);
+    expect(result.error.category).toBe('sensitiveFiles');
+  });
+
+  it('§3.2-c: shell command reading /etc/passwd | grep blocked', () => {
+    const result = validateToolCall(
+      'http-client__http_request',
+      { url: 'http://target/run', method: 'POST', body: 'cmd=cat /etc/passwd | grep root' },
+      { clientId: 'fp-9', userId: 'tester', source: '/mcp' },
+    );
+    expect(result.allowed).toBe(false);
+  });
+
+  it('§3.2-d: id_rsa boundary — id_rsax NOT blocked, ~/.ssh/id_rsa IS blocked', () => {
+    // id_rsax is identifier continuation → no match
+    const ok = validateToolCall(
+      'file_read_MCP__read',
+      { path: 'tools/id_rsax/parser.js' },
+      { clientId: 'fp-10a', userId: 'tester', source: '/mcp' },
+    );
+    expect(ok.allowed).toBe(true);
+    // bare id_rsa → match
+    const blocked = validateToolCall(
+      'file_read_MCP__read',
+      { path: '~/.ssh/id_rsa' },
+      { clientId: 'fp-10b', userId: 'tester', source: '/mcp' },
+    );
+    // either sensitiveFiles via id_rsa OR via .ssh/ matches — both should block
+    expect(blocked.allowed).toBe(false);
+  });
+
+  // ---- §7.2: Stage 5 error.category is now populated ----
+
+  it('§7.2: PII block returns category=pii (not undefined/unknown)', () => {
+    const result = validateToolCall(
+      'wordpress__create_post',
+      { content: 'leak: alice@victim.com bob@victim.com' },
+      { clientId: 'fp-11', userId: 'tester', source: '/mcp' },
+    );
+    expect(result.allowed).toBe(false);
+    expect(result.error.category).toBe('pii');
+    expect(result.error.detector).toBe('pii');
+  });
+});
