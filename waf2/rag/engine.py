@@ -11,10 +11,13 @@
   - 初始化失败时允许抛异常, 由 waf2_proxy 决定是降级还是禁用 RAG
   - retrieve() 内部异常不抛, 返回空列表 (由调用方记录 stats['rag_errors'])
   - 线程安全: ChromaDB 和 onnxruntime 都支持并发查询
+  - aretrieve() (async): 用 asyncio.to_thread 包装,使 ONNX 推理与 ChromaDB 查询
+    不阻塞调用方的事件循环 (improve-waf2-concurrency-for-rq5)
 """
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import time
 from dataclasses import dataclass
@@ -136,6 +139,15 @@ class RagEngine:
             self.stats.empty_results += 1
 
         return results
+
+    async def aretrieve(self, text: str) -> list[RetrievalResult]:
+        """异步包装,等价于 retrieve() 但跑在线程池避免阻塞事件循环。
+
+        ONNX 推理与 ChromaDB 查询都是同步 CPU/IO,搬到 asyncio.to_thread 后:
+          - 主事件循环在 ONNX encode / Chroma query 期间可以继续调度其它请求
+          - 调用语义、返回值、内部 stats 累积全部与同步版一致
+        """
+        return await asyncio.to_thread(self.retrieve, text)
 
     def info(self) -> dict[str, Any]:
         kb_info = self.knowledge_base.info()

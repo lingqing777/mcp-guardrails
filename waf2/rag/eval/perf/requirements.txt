@@ -1,0 +1,15 @@
+# WAF2 RQ5 perf harness dependencies (dev-only — NOT bundled into WAF2 docker image).
+#
+# Install with:
+#   pip install -r waf2/rag/eval/perf/requirements.txt
+#
+# These are required to run the load driver, resource sampler, and report generator.
+# The WAF2 service container itself (waf2/requirements.txt) is unaffected by this file.
+
+httpx>=0.24            # already a project dep; pinned here for explicitness
+psutil>=5.9            # resource sampling (CPU / RSS) — three-tier fallback in sampler
+numpy>=1.24            # percentile statistics in report
+pandas>=1.5            # CSV merge / windowing in report
+
+# Optional. Report skips timeseries.png if matplotlib is absent (try-import).
+matplotlib>=3.5; python_version >= "3.8"

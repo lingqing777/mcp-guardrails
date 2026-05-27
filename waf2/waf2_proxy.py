@@ -47,14 +47,22 @@ from fastapi.responses import JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 import httpx
 import requests
+import asyncio
+import inspect
 import json
 import hashlib
 import re
 import base64
 import urllib.parse
+from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime
 from typing import Optional, Dict, Any, List
-from collections import defaultdict
+from collections import defaultdict, deque
+
+try:
+    import numpy as _np
+except Exception:  # pragma: no cover - numpy is a hard runtime dep but guard anyway
+    _np = None
 
 app = FastAPI(title="WAF2 - MCP Guardrails (RAG+CoT Full)")
 
@@ -184,6 +192,13 @@ class WAF2Config:
         self.rag_decisive_fallback_categories = {
             c.strip().lower() for c in _rescue_cats_env.split(",") if c.strip()
         }
+        # Concurrency knobs (improve-waf2-concurrency-for-rq5).
+        # LLM_CONCURRENCY: max in-flight LLM HTTP calls. Protects downstream LLM under load test.
+        # PATH_LATENCY_WINDOW: rolling sample window per routing path (stage0/local_only/rag/llm).
+        # THREADPOOL_MAX_WORKERS: default executor size for asyncio.to_thread (RAG + ONNX).
+        self.llm_concurrency = int(os.environ.get("LLM_CONCURRENCY", "8"))
+        self.path_latency_window = int(os.environ.get("PATH_LATENCY_WINDOW", "1024"))
+        self.threadpool_max_workers = int(os.environ.get("THREADPOOL_MAX_WORKERS", "32"))
 
 
 config = WAF2Config()
@@ -228,26 +243,39 @@ class ConfigUpdate(BaseModel):
     rag_decisive_fallback_enabled: Optional[bool] = None
     rag_decisive_fallback_min_score: Optional[float] = None
     rag_decisive_fallback_categories: Optional[List[str]] = None
+    # Concurrency knobs (improve-waf2-concurrency-for-rq5). Note: llm_concurrency takes
+    # effect on next container start; runtime change is accepted but not re-builds Semaphore.
+    llm_concurrency: Optional[int] = None
+    path_latency_window: Optional[int] = None
+    threadpool_max_workers: Optional[int] = None
 
 
 # ==================== 缓存机制 ====================
 
 class LLMCache:
-    """LLM 结果缓存，避免重复调用"""
+    """LLM 结果缓存，避免重复调用。
+
+    改造 (improve-waf2-concurrency-for-rq5):
+      - get() 仍为同步接口,返回命中条目或 None,不阻塞事件循环
+      - 新增 single_flight() 异步接口: 同 key 并发 miss 时合并为单次调用
+      - asyncio 单线程内 dict 写入原子,无需 Lock
+    """
     def __init__(self, max_size=500, ttl_seconds=300):
-        self.cache = {}
+        self.cache: Dict[str, Dict[str, Any]] = {}
         self.max_size = max_size
         self.ttl = ttl_seconds
+        # In-flight futures keyed by md5 hash; cleaned up after producer finishes.
+        self._inflight: Dict[str, "asyncio.Future[Any]"] = {}
 
-    def _hash(self, text: str) -> str:
-        return hashlib.md5(text.encode()).hexdigest()
+    def _hash(self, key: str) -> str:
+        return hashlib.md5(key.encode()).hexdigest()
 
     def get(self, key: str) -> Optional[Dict]:
         h = self._hash(key)
-        if h in self.cache:
-            entry = self.cache[h]
-            if (datetime.now().timestamp() - entry['ts']) < self.ttl:
-                return entry['value']
+        entry = self.cache.get(h)
+        if entry and (datetime.now().timestamp() - entry['ts']) < self.ttl:
+            return entry['value']
+        if entry:
             del self.cache[h]
         return None
 
@@ -257,8 +285,145 @@ class LLMCache:
             del self.cache[oldest]
         self.cache[self._hash(key)] = {'value': value, 'ts': datetime.now().timestamp()}
 
+    async def single_flight(self, key: str, producer):
+        """对同 key 并发 miss 做合并:第一个协程跑 producer,其他协程 await 同一 Future。
+
+        producer: 一个无参 async callable, 返回最终要缓存的值 (dict 或字符串等)。
+        若 producer 抛异常,所有等待方收到同一异常,in-flight 表项被清理。
+        命中缓存直接返回。
+        """
+        h = self._hash(key)
+        # Fast path: cache hit
+        entry = self.cache.get(h)
+        if entry and (datetime.now().timestamp() - entry['ts']) < self.ttl:
+            return entry['value']
+        if entry:
+            del self.cache[h]
+
+        # Join in-flight if same key is already being produced
+        existing = self._inflight.get(h)
+        if existing is not None:
+            return await existing
+
+        loop = asyncio.get_event_loop()
+        future: "asyncio.Future[Any]" = loop.create_future()
+        self._inflight[h] = future
+        try:
+            value = await producer()
+            self.set(key, value)
+            future.set_result(value)
+            return value
+        except BaseException as exc:
+            future.set_exception(exc)
+            raise
+        finally:
+            self._inflight.pop(h, None)
+
 
 llm_cache = LLMCache()
+
+
+# ==================== 分路径延迟直方图 ====================
+
+class PathLatencyTracker:
+    """按四条路由路径记录延迟,基于滑动窗口 deque。
+
+    路径分桶 (improve-waf2-concurrency-for-rq5):
+      - stage0:     STATIC_RULES 正则命中 (proxy 阶段0) 与 normalize 后静态/关键词命中
+      - local_only: route_fast_pass / local_attack_score 直接 BLOCK,未触达 LLM
+      - rag:        RAG 检索参与但 LLM 未参与的判定 (e.g. RAG-decisive rescue,
+                    benign hard-negative + RAG)
+      - llm:        ROUTE_LOCAL_LLM / ROUTE_REACT 路径,实际调用了 LLM
+    """
+
+    _PATHS = ("stage0", "local_only", "rag", "llm")
+
+    def __init__(self, window: int = 1024):
+        self.window = max(int(window), 1)
+        self._samples: Dict[str, deque] = {p: deque(maxlen=self.window) for p in self._PATHS}
+
+    def record(self, path: str, latency_ms: float) -> None:
+        if path not in self._samples:
+            return
+        try:
+            self._samples[path].append(float(latency_ms))
+        except (TypeError, ValueError):
+            return
+
+    def snapshot(self) -> Dict[str, Dict[str, Any]]:
+        out: Dict[str, Dict[str, Any]] = {}
+        for path, samples in self._samples.items():
+            count = len(samples)
+            if not count:
+                out[path] = {'p50': None, 'p95': None, 'p99': None, 'count': 0}
+                continue
+            data = list(samples)
+            if _np is not None:
+                arr = _np.asarray(data, dtype=float)
+                p50 = float(_np.percentile(arr, 50))
+                p95 = float(_np.percentile(arr, 95))
+                p99 = float(_np.percentile(arr, 99))
+            else:  # pragma: no cover - fallback only
+                data_sorted = sorted(data)
+                def _pct(p):
+                    if not data_sorted:
+                        return None
+                    k = max(0, min(len(data_sorted) - 1, int(round((p / 100.0) * (len(data_sorted) - 1)))))
+                    return float(data_sorted[k])
+                p50, p95, p99 = _pct(50), _pct(95), _pct(99)
+            out[path] = {
+                'p50': round(p50, 3),
+                'p95': round(p95, 3),
+                'p99': round(p99, 3),
+                'count': count,
+            }
+        return out
+
+    def reset(self) -> None:
+        for p in self._PATHS:
+            self._samples[p].clear()
+
+
+path_latency_tracker = PathLatencyTracker(window=config.path_latency_window)
+
+
+# ==================== 异步 LLM 客户端与并发上限 ====================
+# improve-waf2-concurrency-for-rq5: 在 async handler 中调用同步 requests.post 会阻塞
+# uvicorn 事件循环,导致同期到达的 stage0 快速路径请求 P95 被拉到秒级。改用 httpx 异步
+# 客户端 + asyncio.Semaphore 限制并发,使分路径延迟指标真实反映 WAF2 设计。
+
+_async_http_client: Optional[httpx.AsyncClient] = None
+_llm_semaphore: Optional[asyncio.Semaphore] = None
+
+
+def get_async_http_client() -> httpx.AsyncClient:
+    """模块级 httpx.AsyncClient 单例,带连接池。测试通过 set_async_http_client 注入 mock。"""
+    global _async_http_client
+    if _async_http_client is None:
+        _async_http_client = httpx.AsyncClient(
+            timeout=config.llm_timeout_seconds,
+            verify=config.verify_ssl,
+        )
+    return _async_http_client
+
+
+def set_async_http_client(client: Optional[httpx.AsyncClient]) -> None:
+    """测试钩子:用 mock 客户端替换单例;传 None 重置为生产单例。"""
+    global _async_http_client
+    _async_http_client = client
+
+
+def get_llm_semaphore() -> asyncio.Semaphore:
+    global _llm_semaphore
+    if _llm_semaphore is None:
+        _llm_semaphore = asyncio.Semaphore(max(int(config.llm_concurrency), 1))
+    return _llm_semaphore
+
+
+def reset_llm_semaphore() -> None:
+    """测试钩子:在调整 config.llm_concurrency 后强制下次重建 Semaphore。"""
+    global _llm_semaphore
+    _llm_semaphore = None
 
 # ==================== 统计信息 ====================
 
@@ -724,6 +889,38 @@ def _record_route_counter(route: str):
         stats['route_react_fallback_rag_rescue'] += 1
 
 
+def _route_to_path_bucket(req_result: Optional[Dict[str, Any]], static_hit: bool = False) -> str:
+    """Map an internal route name → per_path_latency bucket.
+
+    Buckets (improve-waf2-concurrency-for-rq5):
+      - stage0:     proxy stage-0 STATIC_RULES hit (before analyze_request),
+                    or ROUTE_STATIC_BLOCK (decoded/keyword/local-score direct block)
+      - local_only: ROUTE_FAST_PASS (no RAG used, no LLM)
+      - rag:        path consulted RAG (rag_augmented or rag_used) but did not run LLM
+                    (e.g. ROUTE_KNOWLEDGE_EVIDENCE, ROUTE_REACT_FALLBACK_RAG_RESCUE,
+                     benign hard-negative + RAG fast pass)
+      - llm:        ROUTE_LOCAL_LLM (one-shot LLM) or ROUTE_REACT (agent), and
+                    ROUTE_FALLBACK after Agent failure (we still spent the LLM time)
+    """
+    if static_hit:
+        return 'stage0'
+    if not req_result:
+        return 'local_only'
+    route = req_result.get('route') or ''
+    if route == ROUTE_STATIC_BLOCK:
+        return 'stage0'
+    if route in (ROUTE_LOCAL_LLM, ROUTE_REACT, ROUTE_FALLBACK):
+        return 'llm'
+    if route == ROUTE_KNOWLEDGE_EVIDENCE:
+        return 'rag'
+    if route == ROUTE_REACT_FALLBACK_RAG_RESCUE:
+        return 'rag'
+    if route == ROUTE_FAST_PASS:
+        return 'rag' if req_result.get('rag_augmented') else 'local_only'
+    # Defensive default: anything else without LLM signal counts as local.
+    return 'local_only'
+
+
 def _local_score_block_result(score_result: Dict[str, Any], route_info: Dict[str, Any], normalization: Dict[str, Any]) -> Dict[str, Any]:
     category = score_result.get('top_category') or 'unknown'
     if category not in ATTACK_CATEGORIES:
@@ -756,66 +953,74 @@ def _local_score_block_result(score_result: Dict[str, Any], route_info: Dict[str
 
 # ==================== LLM 调用 ====================
 
-def call_llm(prompt: str) -> str:
-    """调用 LLM API (根据 format 配置选择对应的请求构造逻辑)"""
+async def call_llm(prompt: str) -> str:
+    """调用 LLM API (根据 format 配置选择对应的请求构造逻辑)。
+
+    改造 (improve-waf2-concurrency-for-rq5): 改为 async,使用 httpx.AsyncClient 单例
+    + asyncio.Semaphore 限制实际在飞调用数,不阻塞事件循环。Provider 三种格式与
+    解析逻辑保持不变。
+    """
     base = config.base_url.rstrip("/")
     fmt = config.format or "openai"
+    client = get_async_http_client()
+    sem = get_llm_semaphore()
 
     try:
-        if fmt == "anthropic":
-            url = base + "/v1/messages"
-            headers = {
-                "Content-Type": "application/json",
-                "anthropic-version": "2023-06-01",
-            }
-            if config.api_key:
-                headers["x-api-key"] = config.api_key
-            resp = requests.post(
-                url,
-                headers=headers,
-                json={
-                    "model": config.model,
-                    "messages": [{"role": "user", "content": prompt}],
-                    "max_tokens": config.llm_max_tokens,
-                },
-                timeout=config.llm_timeout_seconds,
-            )
-            return resp.json()["content"][0]["text"].strip()
+        async with sem:
+            if fmt == "anthropic":
+                url = base + "/v1/messages"
+                headers = {
+                    "Content-Type": "application/json",
+                    "anthropic-version": "2023-06-01",
+                }
+                if config.api_key:
+                    headers["x-api-key"] = config.api_key
+                resp = await client.post(
+                    url,
+                    headers=headers,
+                    json={
+                        "model": config.model,
+                        "messages": [{"role": "user", "content": prompt}],
+                        "max_tokens": config.llm_max_tokens,
+                    },
+                    timeout=config.llm_timeout_seconds,
+                )
+                return resp.json()["content"][0]["text"].strip()
 
-        elif fmt == "gemini":
-            url = base + f"/v1beta/models/{config.model}:generateContent"
-            headers = {"Content-Type": "application/json"}
-            if config.api_key:
-                headers["x-goog-api-key"] = config.api_key
-            resp = requests.post(
-                url,
-                headers=headers,
-                json={
-                    "contents": [{"role": "user", "parts": [{"text": prompt}]}],
-                    "generationConfig": {"temperature": 0, "maxOutputTokens": config.llm_max_tokens},
-                },
-                timeout=config.llm_timeout_seconds,
-            )
-            return resp.json()["candidates"][0]["content"]["parts"][0]["text"].strip()
+            elif fmt == "gemini":
+                url = base + f"/v1beta/models/{config.model}:generateContent"
+                headers = {"Content-Type": "application/json"}
+                if config.api_key:
+                    headers["x-goog-api-key"] = config.api_key
+                resp = await client.post(
+                    url,
+                    headers=headers,
+                    json={
+                        "contents": [{"role": "user", "parts": [{"text": prompt}]}],
+                        "generationConfig": {"temperature": 0, "maxOutputTokens": config.llm_max_tokens},
+                    },
+                    timeout=config.llm_timeout_seconds,
+                )
+                return resp.json()["candidates"][0]["content"]["parts"][0]["text"].strip()
 
-        else:
-            # OpenAI 兼容格式 (默认)
-            url = base + "/chat/completions"
-            headers = {"Content-Type": "application/json"}
-            if config.api_key:
-                headers["Authorization"] = f"Bearer {config.api_key}"
-            resp = requests.post(
-                url,
-                headers=headers,
-                json={
-                    "model": config.model,
-                    "messages": [{"role": "user", "content": prompt}],
-                    "temperature": 0,
-                    "max_tokens": config.llm_max_tokens,
-                },
-                timeout=config.llm_timeout_seconds,
-            )
-            return resp.json()["choices"][0]["message"]["content"].strip()
+            else:
+                # OpenAI 兼容格式 (默认)
+                url = base + "/chat/completions"
+                headers = {"Content-Type": "application/json"}
+                if config.api_key:
+                    headers["Authorization"] = f"Bearer {config.api_key}"
+                resp = await client.post(
+                    url,
+                    headers=headers,
+                    json={
+                        "model": config.model,
+                        "messages": [{"role": "user", "content": prompt}],
+                        "temperature": 0,
+                        "max_tokens": config.llm_max_tokens,
+                    },
+                    timeout=config.llm_timeout_seconds,
+                )
+                return resp.json()["choices"][0]["message"]["content"].strip()
 
     except Exception as e:
         print(f"[WAF2] ⚠️ LLM 调用失败 (format={fmt}): {e}")
@@ -952,15 +1157,19 @@ def _rag_decisive_rescue(rag_meta: Optional[Dict[str, Any]],
     }
 
 
-def _do_rag_retrieve(text: str):
-    """执行 RAG 检索, 返回 (context_str, used, top_score, meta)。"""
+async def _do_rag_retrieve(text: str):
+    """执行 RAG 检索, 返回 (context_str, used, top_score, meta)。
+
+    改造 (improve-waf2-concurrency-for-rq5): 改为 async,内部 await aretrieve()
+    把 ONNX 推理与 ChromaDB 查询搬到线程池。stats 累积语义不变。
+    """
     if not rag_engine or not config.rag_enabled:
         return format_retrieved_context([]), False, 0.0, _empty_rag_meta("disabled")
 
     import time as _time
     _start = _time.perf_counter()
     try:
-        results = rag_engine.retrieve(text)
+        results = await rag_engine.aretrieve(text)
     except Exception as _exc:
         stats['rag_errors'] += 1
         print(f"[WAF2] ⚠️ RAG 检索失败: {_exc}", flush=True)
@@ -1081,17 +1290,20 @@ def _tool_decode_unicode(text: str) -> Dict[str, Any]:
         return {'ok': False, 'reason': f'decode error: {e}'}
 
 
-def _tool_rag_search(text: str) -> Dict[str, Any]:
+async def _tool_rag_search(text: str) -> Dict[str, Any]:
     """RAG 工具: 对一段子串做相似攻击检索, 返回 top-k 摘要。
 
     设计意图: Agent 在 base64/hex/unicode 解码出明文后, 可对解码后的子串做二次检索,
     形成"解码 → 检索"的强证据链。直接对原始密文检索意义不大。
+
+    改造 (improve-waf2-concurrency-for-rq5): 改 async,await _do_rag_retrieve;
+    ReAct loop 通过 inspect.iscoroutine 检测并 await。
     """
     if not text or not isinstance(text, str):
         return {'ok': False, 'reason': 'empty input'}
     if rag_engine is None or not config.rag_enabled:
         return {'ok': False, 'reason': 'RAG engine disabled'}
-    context_str, used, top_score, meta = _do_rag_retrieve(text[:800])
+    context_str, used, top_score, meta = await _do_rag_retrieve(text[:800])
     if not used:
         return {'ok': False, 'reason': 'no similar cases', 'top_score': round(top_score, 4), 'outcome': meta.get('rag_outcome', 'empty')}
     return {
@@ -1537,13 +1749,17 @@ def _parse_agent_action(text: str) -> Optional[Dict[str, Any]]:
     return None
 
 
-def run_react_agent(prompt: str, max_iters: int = 4) -> Optional[Dict[str, Any]]:
-    """运行 ReAct 循环, 返回 final_answer 的 action_input。失败返回 None。"""
+async def run_react_agent(prompt: str, max_iters: int = 4) -> Optional[Dict[str, Any]]:
+    """运行 ReAct 循环, 返回 final_answer 的 action_input。失败返回 None。
+
+    改造 (improve-waf2-concurrency-for-rq5): 改 async, await call_llm 与异步工具
+    (rag_search)。同步工具 (decode_*) 直接返回结果,通过 iscoroutine 判别。
+    """
     stats['agent_invocations'] += 1
     scratchpad = ''
     for step in range(max_iters):
         full_prompt = prompt + scratchpad + '\nThought:'
-        raw = call_llm(full_prompt)
+        raw = await call_llm(full_prompt)
         if raw == 'ERROR':
             return None
         action = _parse_agent_action(raw)
@@ -1569,6 +1785,8 @@ def run_react_agent(prompt: str, max_iters: int = 4) -> Optional[Dict[str, Any]]
         else:
             try:
                 result = tool['fn'](args)
+                if inspect.iscoroutine(result):
+                    result = await result
                 observation = json.dumps(result, ensure_ascii=False)[:800]
             except Exception as e:
                 observation = f'Tool error: {e}'
@@ -1612,7 +1830,7 @@ def _verdict_to_result(final: Dict[str, Any], direction: str) -> Optional[Dict[s
     return None
 
 
-def one_shot_analyze_request(
+async def one_shot_analyze_request(
     method: str,
     path: str,
     body: str,
@@ -1634,14 +1852,14 @@ def one_shot_analyze_request(
         path=path,
         body=(body[:500] if body else '(空)'),
     )
-    raw = call_llm(prompt)
+    raw = await call_llm(prompt)
     result = parse_llm_result(raw, 'request')
     result['engine'] = 'llm_one_shot'
     result['route'] = 'one_shot'
     return result
 
 
-def agent_analyze_request(method: str, path: str, body: str, retrieved_context: str) -> Optional[Dict[str, Any]]:
+async def agent_analyze_request(method: str, path: str, body: str, retrieved_context: str) -> Optional[Dict[str, Any]]:
     prompt = REACT_REQUEST_PROMPT.format(
         retrieved_context=retrieved_context,
         taxonomy=ATTACK_TAXONOMY,
@@ -1651,13 +1869,13 @@ def agent_analyze_request(method: str, path: str, body: str, retrieved_context: 
         path=path,
         body=(body[:500] if body else '(空)'),
     )
-    final = run_react_agent(prompt, max_iters=config.agent_max_iters_request)
+    final = await run_react_agent(prompt, max_iters=config.agent_max_iters_request)
     if not final:
         return None
     return _verdict_to_result(final, 'request')
 
 
-def agent_analyze_response(status_code: int, body: str, retrieved_context: str) -> Optional[Dict[str, Any]]:
+async def agent_analyze_response(status_code: int, body: str, retrieved_context: str) -> Optional[Dict[str, Any]]:
     prompt = REACT_RESPONSE_PROMPT.format(
         retrieved_context=retrieved_context,
         taxonomy=ATTACK_TAXONOMY,
@@ -1666,7 +1884,7 @@ def agent_analyze_response(status_code: int, body: str, retrieved_context: str) 
         status_code=status_code,
         body=body[:1000],
     )
-    final = run_react_agent(prompt, max_iters=config.agent_max_iters_response)
+    final = await run_react_agent(prompt, max_iters=config.agent_max_iters_response)
     if not final:
         return None
     return _verdict_to_result(final, 'response')
@@ -1674,7 +1892,7 @@ def agent_analyze_response(status_code: int, body: str, retrieved_context: str) 
 
 # ==================== 调度入口 (analyze_*) ====================
 
-def analyze_request(
+async def analyze_request(
     method: str,
     path: str,
     body: str,
@@ -1715,6 +1933,47 @@ def analyze_request(
             stats['cache_hits'] += 1
             return cached
 
+        # Single-flight: 同 key 并发 miss 合并为单次产出。
+        # 已在飞:复用同一 Future,产出由领跑者负责。
+        # 未在飞 (首次 miss):创建 Future,运行下面的实际分析路径并写入 cache。
+        existing_inflight = llm_cache._inflight.get(llm_cache._hash(cache_key))
+        if existing_inflight is not None:
+            return await existing_inflight
+        loop = asyncio.get_event_loop()
+        future: "asyncio.Future[Any]" = loop.create_future()
+        llm_cache._inflight[llm_cache._hash(cache_key)] = future
+        try:
+            result = await _analyze_request_uncached(
+                method, path, body, headers, normalization, normalized_path, normalized_body,
+                score_result, cache_key,
+            )
+            future.set_result(result)
+            return result
+        except BaseException as exc:
+            future.set_exception(exc)
+            raise
+        finally:
+            llm_cache._inflight.pop(llm_cache._hash(cache_key), None)
+
+    # cache disabled — no single-flight needed
+    return await _analyze_request_uncached(
+        method, path, body, headers, normalization, normalized_path, normalized_body,
+        score_result, cache_key,
+    )
+
+
+async def _analyze_request_uncached(
+    method: str,
+    path: str,
+    body: str,
+    headers: Optional[Dict[str, str]],
+    normalization: Dict[str, Any],
+    normalized_path: str,
+    normalized_body: str,
+    score_result: Dict[str, Any],
+    cache_key: str,
+) -> Dict[str, Any]:
+    """实际的请求分析路径,从 cache miss 之后的所有逻辑。提取出来便于 single-flight 包裹。"""
     pre_route = decide_route(method, normalized_path, normalization, score_result, False, 0.0, config)
     if pre_route.get('route') == ROUTE_STATIC_BLOCK:
         _record_route_counter(ROUTE_STATIC_BLOCK)
@@ -1810,7 +2069,7 @@ def analyze_request(
 
     # 层 3a: RAG 检索 (头部预注入用)
     rag_input = _build_request_rag_input(method, normalized_path, normalized_body)
-    retrieved_context, rag_used_raw, top_score, rag_meta = _do_rag_retrieve(rag_input)
+    retrieved_context, rag_used_raw, top_score, rag_meta = await _do_rag_retrieve(rag_input)
     rag_gated = False
     if rag_used_raw and top_score < config.rag_confidence_threshold:
         rag_gated = True
@@ -1891,7 +2150,7 @@ def analyze_request(
     if route == ROUTE_LOCAL_LLM:
         _record_route_counter(ROUTE_LOCAL_LLM)
         stats['llm_calls'] += 1
-        one_shot_result = one_shot_analyze_request(method, normalized_path, normalized_body, retrieved_context, route_info)
+        one_shot_result = await one_shot_analyze_request(method, normalized_path, normalized_body, retrieved_context, route_info)
         one_shot_result['rag_augmented'] = rag_used
         one_shot_result['rag_gated'] = rag_gated
         one_shot_result['rag_top_score'] = round(top_score, 4) if top_score else 0.0
@@ -1917,7 +2176,7 @@ def analyze_request(
     # 深层路径: ReAct Agent
     _record_route_counter(ROUTE_REACT)
     stats['llm_calls'] += 1
-    agent_result = agent_analyze_request(method, normalized_path, normalized_body, retrieved_context)
+    agent_result = await agent_analyze_request(method, normalized_path, normalized_body, retrieved_context)
     if agent_result is not None:
         agent_result['rag_augmented'] = rag_used
         agent_result['rag_gated'] = rag_gated
@@ -2007,7 +2266,7 @@ def analyze_request(
     return fail
 
 
-def analyze_response(status_code: int, body: str) -> Dict[str, Any]:
+async def analyze_response(status_code: int, body: str) -> Dict[str, Any]:
     """分析响应 (敏感正则 → RAG (仅 scope=all) → ReAct Agent)"""
     if not config.response_analysis:
         return {'blocked': False, 'direction': 'response'}
@@ -2027,6 +2286,27 @@ def analyze_response(status_code: int, body: str) -> Dict[str, Any]:
             stats['cache_hits'] += 1
             return cached
 
+        existing_inflight = llm_cache._inflight.get(llm_cache._hash(cache_key))
+        if existing_inflight is not None:
+            return await existing_inflight
+        loop = asyncio.get_event_loop()
+        future: "asyncio.Future[Any]" = loop.create_future()
+        llm_cache._inflight[llm_cache._hash(cache_key)] = future
+        try:
+            result = await _analyze_response_uncached(status_code, body, cache_key)
+            future.set_result(result)
+            return result
+        except BaseException as exc:
+            future.set_exception(exc)
+            raise
+        finally:
+            llm_cache._inflight.pop(llm_cache._hash(cache_key), None)
+
+    return await _analyze_response_uncached(status_code, body, cache_key)
+
+
+async def _analyze_response_uncached(status_code: int, body: str, cache_key: str) -> Dict[str, Any]:
+    """实际的响应分析路径,提取以便 single-flight 包裹。"""
     # 层 1: 静态敏感数据正则
     sens_hit = static_sensitive_prefilter(body)
     if sens_hit:
@@ -2037,13 +2317,13 @@ def analyze_response(status_code: int, body: str) -> Dict[str, Any]:
 
     # 层 2a: RAG 检索 (仅 scope=all)
     if config.rag_scope == "all":
-        retrieved_context, rag_used, top_score, rag_meta = _do_rag_retrieve(body[:500])
+        retrieved_context, rag_used, top_score, rag_meta = await _do_rag_retrieve(body[:500])
     else:
         retrieved_context, rag_used, top_score, rag_meta = format_retrieved_context([]), False, 0.0, _empty_rag_meta("disabled")
 
     # 层 2b: ReAct Agent
     stats['llm_calls'] += 1
-    agent_result = agent_analyze_response(status_code, body, retrieved_context)
+    agent_result = await agent_analyze_response(status_code, body, retrieved_context)
     if agent_result is not None:
         agent_result['rag_augmented'] = rag_used
         agent_result['rag_top_score'] = round(top_score, 4) if top_score else 0.0
@@ -2232,6 +2512,38 @@ def _config_snapshot() -> Dict[str, Any]:
         'agent_tools': list(AGENT_TOOLS.keys()),
         'edition': 'full',
     }
+
+
+@app.on_event("startup")
+async def _waf2_startup() -> None:
+    """启动钩子: 调整默认线程池大小, 预热 httpx 异步客户端。
+
+    improve-waf2-concurrency-for-rq5: 让 RAG (asyncio.to_thread 包装的 ONNX/Chroma)
+    在足够大的线程池上跑, 同时把 LLM 客户端单例创建在事件循环内, 避免首次请求
+    时构建 transport 抖动。
+    """
+    try:
+        loop = asyncio.get_running_loop()
+        loop.set_default_executor(
+            ThreadPoolExecutor(max_workers=max(int(config.threadpool_max_workers), 1))
+        )
+    except Exception as exc:  # pragma: no cover - defensive
+        print(f"[WAF2] ⚠️ 设置默认线程池失败: {exc}")
+    # Eagerly construct singleton so initial-request latency is not skewed.
+    get_async_http_client()
+    get_llm_semaphore()
+
+
+@app.on_event("shutdown")
+async def _waf2_shutdown() -> None:
+    """关闭钩子: 优雅关闭 httpx 异步客户端连接池。"""
+    global _async_http_client
+    if _async_http_client is not None:
+        try:
+            await _async_http_client.aclose()
+        except Exception:
+            pass
+        _async_http_client = None
 
 
 @app.get("/waf2/config")
@@ -2469,6 +2781,7 @@ async def get_stats():
         'route_local_llm_one_shot': stats['route_local_llm_one_shot'],
         'route_react_deep_inspection': stats['route_react_deep_inspection'],
         'route_fallback': stats['route_fallback'],
+        'per_path_latency': path_latency_tracker.snapshot(),
     }
 
 
@@ -2554,6 +2867,7 @@ async def get_dashboard():
             'react_deep_inspection': stats['route_react_deep_inspection'],
             'fallback': stats['route_fallback'],
         },
+        'per_path_latency': path_latency_tracker.snapshot(),
         'recent_detections': stats['detections'][-10:],
     }
 
@@ -2602,6 +2916,8 @@ async def reset_stats():
     stats['route_one_shot'] = 0
     stats['route_react'] = 0
     stats['route_agent_fallback'] = 0
+    # Reset per-path latency tracker (improve-waf2-concurrency-for-rq5)
+    path_latency_tracker.reset()
     return {'success': True, 'message': '统计数据已重置'}
 
 
@@ -2718,6 +3034,7 @@ async def proxy(path: str, request: Request):
             'path': full_url, 'body': body[:500], **static_result,
         })
         elapsed = (datetime.now() - start_time).total_seconds() * 1000
+        path_latency_tracker.record('stage0', elapsed)
         print(f"[WAF2] ❌ 静态规则拦截 [{static_result.get('category')}]: {static_result.get('reason')}")
         print(f"[WAF2] ══════════════════════════════════════ ({elapsed:.0f}ms)")
         extra_headers = build_eval_headers(static_result, elapsed) if config.eval_mode else None
@@ -2743,7 +3060,7 @@ async def proxy(path: str, request: Request):
         k: v for k, v in request.headers.items()
         if k.lower() in ("referer", "cookie", "user-agent")
     }
-    req_result = analyze_request(request.method, full_url, body, headers=headers_for_scoring)
+    req_result = await analyze_request(request.method, full_url, body, headers=headers_for_scoring)
     req_result = _apply_eval_fail_closed(req_result, 'request', 'LLM 调用失败/不可解析，按 fail-closed 拦截')
 
     if req_result.get('llm_error') and not req_result.get('blocked'):
@@ -2759,6 +3076,7 @@ async def proxy(path: str, request: Request):
             'path': f"/{path}", 'body': body[:500], **req_result,
         })
         elapsed = (datetime.now() - start_time).total_seconds() * 1000
+        path_latency_tracker.record(_route_to_path_bucket(req_result), elapsed)
         print(f"[WAF2] ❌ 请求拦截 [{req_result.get('category')}]: {req_result.get('reason')}")
         print(f"[WAF2] ══════════════════════════════════════ ({elapsed:.0f}ms)")
         extra_headers = build_eval_headers(req_result, elapsed) if config.eval_mode else None
@@ -2790,6 +3108,7 @@ async def proxy(path: str, request: Request):
         elapsed = (datetime.now() - start_time).total_seconds() * 1000
         stats['total_latency_ms'] += elapsed
         stats['avg_latency_ms'] = stats['total_latency_ms'] / stats['total']
+        path_latency_tracker.record(_route_to_path_bucket(req_result), elapsed)
         print(f"[WAF2] 🧪 EVAL_MODE 放行 (mock upstream 200)")
         print(f"[WAF2] ══════════════════════════════════════ ({elapsed:.0f}ms)")
         extra_headers = build_eval_headers(req_result, elapsed)
@@ -2828,7 +3147,7 @@ async def proxy(path: str, request: Request):
         return Response(content=f"上游服务错误: {e}", status_code=502)
 
     # ========== 阶段3: 响应检测 ==========
-    resp_result = analyze_response(resp_status, resp_body)
+    resp_result = await analyze_response(resp_status, resp_body)
     resp_result = _apply_eval_fail_closed(resp_result, 'response', '响应分析失败，按 fail-closed 拦截')
 
     if resp_result.get('blocked'):
@@ -2842,6 +3161,7 @@ async def proxy(path: str, request: Request):
             'response_preview': resp_body[:200], **resp_result,
         })
         elapsed = (datetime.now() - start_time).total_seconds() * 1000
+        path_latency_tracker.record(_route_to_path_bucket(req_result), elapsed)
         print(f"[WAF2] ❌ 响应拦截 [{resp_result.get('category')}]: {resp_result.get('reason')}")
         print(f"[WAF2] ══════════════════════════════════════ ({elapsed:.0f}ms)")
         return Response(
@@ -2864,6 +3184,7 @@ async def proxy(path: str, request: Request):
     elapsed = (datetime.now() - start_time).total_seconds() * 1000
     stats['total_latency_ms'] += elapsed
     stats['avg_latency_ms'] = stats['total_latency_ms'] / stats['total']
+    path_latency_tracker.record(_route_to_path_bucket(req_result), elapsed)
 
     print(f"[WAF2] ✅ 放行 (上游: {resp_status})")
     print(f"[WAF2] ══════════════════════════════════════ ({elapsed:.0f}ms)")
@@ -2899,6 +3220,8 @@ if __name__ == "__main__":
     print(f"  Routing:  enabled={config.react_routing_enabled}, "
           f"react_rag_score={config.react_rag_score_threshold}")
     print(f"  Eval:     mode={config.eval_mode}, fail_closed={config.eval_fail_closed}")
+    print(f"  Concurr:  llm_concurrency={config.llm_concurrency}, "
+          f"path_window={config.path_latency_window}, threadpool={config.threadpool_max_workers}")
     print(f"  Pipeline: STATIC_RULES → Normalize/Decode → LocalScore → RAG → Router → OneShot/ReAct (request) ;"
           f" SENSITIVE → RAG(scope=all) → Agent (response)")
     print("=" * 60)

@@ -56,6 +56,13 @@ services:
       - LOCAL_PROVIDER_NAME=${LOCAL_PROVIDER_NAME:-}
       - LOCAL_ATTACK_SCORE_ENABLED=${LOCAL_ATTACK_SCORE_ENABLED:-true}
       - VERIFY_SSL=${VERIFY_SSL:-true}
+      # Concurrency knobs (improve-waf2-concurrency-for-rq5):
+      #   LLM_CONCURRENCY:        max in-flight LLM HTTP calls (asyncio.Semaphore).
+      #   PATH_LATENCY_WINDOW:    rolling window size for per_path_latency snapshot.
+      #   THREADPOOL_MAX_WORKERS: default executor for asyncio.to_thread (RAG+ONNX).
+      - LLM_CONCURRENCY=${LLM_CONCURRENCY:-8}
+      - PATH_LATENCY_WINDOW=${PATH_LATENCY_WINDOW:-1024}
+      - THREADPOOL_MAX_WORKERS=${THREADPOOL_MAX_WORKERS:-32}
     extra_hosts:
       - "host.docker.internal:host-gateway"
     networks:
