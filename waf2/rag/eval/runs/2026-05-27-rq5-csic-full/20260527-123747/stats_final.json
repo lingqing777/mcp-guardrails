@@ -1,0 +1,66 @@
+{
+  "total": 150,
+  "passed": 108,
+  "blocked": 39,
+  "blocked_request": 39,
+  "blocked_response": 0,
+  "cache_hits": 96,
+  "llm_calls": 3,
+  "cache_hit_rate": "97.0%",
+  "avg_latency_ms": "880",
+  "llm_errors": 0,
+  "llm_parse_failed": 0,
+  "local_first_enabled": true,
+  "provider_locality": "local",
+  "privacy_mode": "local_only",
+  "local_provider_name": "ollama",
+  "local_score_evaluations": 150,
+  "local_score_direct_blocks": 12,
+  "local_score_gray_zone": 39,
+  "rag_queries": 3,
+  "rag_errors": 0,
+  "rag_hits": 0,
+  "rag_empty_results": 3,
+  "rag_gated": 0,
+  "rag_positive_evidence": 0,
+  "rag_benign_evidence": 0,
+  "rag_avg_latency_ms": 86.17,
+  "agent_invocations": 0,
+  "agent_tool_calls": {},
+  "agent_salvaged": 0,
+  "route_static_block": 13,
+  "route_fast_pass": 28,
+  "route_one_shot": 3,
+  "route_react": 0,
+  "route_agent_fallback": 0,
+  "route_knowledge_evidence": 0,
+  "route_local_llm_one_shot": 3,
+  "route_react_deep_inspection": 0,
+  "route_fallback": 0,
+  "per_path_latency": {
+    "stage0": {
+      "p50": 0.81,
+      "p95": 2.413,
+      "p99": 3.25,
+      "count": 39
+    },
+    "local_only": {
+      "p50": 0.466,
+      "p95": 2.24,
+      "p99": 2.9,
+      "count": 96
+    },
+    "rag": {
+      "p50": null,
+      "p95": null,
+      "p99": null,
+      "count": 0
+    },
+    "llm": {
+      "p50": 10101.566,
+      "p95": 23014.872,
+      "p99": 25579.542,
+      "count": 12
+    }
+  }
+}

@@ -1,0 +1,53 @@
+{
+  "t0_unix_ts": 1779856797.8675747,
+  "target_rps": 50.0,
+  "steady_seconds": 300.0,
+  "ladder_step_seconds": 30.0,
+  "cooldown_seconds": 10.0,
+  "ladder": [
+    {
+      "rps": 10,
+      "start_ms": 3113,
+      "end_ms": 33258
+    },
+    {
+      "rps": 20,
+      "start_ms": 33258,
+      "end_ms": 63313
+    },
+    {
+      "rps": 40,
+      "start_ms": 63313,
+      "end_ms": 93321
+    }
+  ],
+  "steady_start_ms": 93321,
+  "steady_end_ms": 393992,
+  "sample_size": 5000,
+  "seed": 20260527,
+  "csic_path": "/mnt/e/ctf/ai/mcp-guardrails-master/waf2/rag/eval/csic2010/csic_database.csv",
+  "waf2_url": "http://localhost:8081",
+  "driver_csv": "/mnt/e/ctf/ai/mcp-guardrails-master/waf2/rag/eval/runs/2026-05-27-rq5-csic-full/20260527-123957/driver.csv",
+  "counters": {
+    "sent": 16210,
+    "success": 15174,
+    "blocked": 5149
+  },
+  "driver_args": {
+    "target_rps": 50.0,
+    "steady_seconds": 300.0,
+    "ladder_start": 10.0,
+    "ladder_step_seconds": 30.0,
+    "cooldown_seconds": 10.0,
+    "sample_size": 5000,
+    "full": false,
+    "seed": 20260527,
+    "csic_path": null,
+    "payload_file": null,
+    "out_dir": "/mnt/e/ctf/ai/mcp-guardrails-master/waf2/rag/eval/runs/2026-05-27-rq5-csic-full/20260527-123957",
+    "waf2_url": "http://localhost:8081",
+    "start_at_unix_ts": 1779856797.8675747,
+    "request_timeout": 30.0,
+    "max_connections": 128
+  }
+}

@@ -1,0 +1,42 @@
+{
+  "commit_hash": "d6cfbf6",
+  "timestamp": "2026-05-27T12:38:34",
+  "hostname": "xianxin",
+  "os_release": "Linux-6.6.114.1-microsoft-standard-WSL2-x86_64-with-glibc2.39",
+  "python_version": "3.12.3",
+  "cpu_count": 4,
+  "total_mem_mb": 7943,
+  "out_dir": "/mnt/e/ctf/ai/mcp-guardrails-master/waf2/rag/eval/runs/2026-05-27-rq5-csic-full/20260527-123747",
+  "t0_unix_ts": 1779856667.8866265,
+  "driver_args": {
+    "target_rps": 5.0,
+    "steady_seconds": 30.0,
+    "ladder_start": 5.0,
+    "ladder_step_seconds": 0.0,
+    "cooldown_seconds": 5.0,
+    "sample_size": 50,
+    "full": false,
+    "seed": 20260527,
+    "csic_path": null,
+    "payload_file": null,
+    "out_dir": "/mnt/e/ctf/ai/mcp-guardrails-master/waf2/rag/eval/runs/2026-05-27-rq5-csic-full/20260527-123747",
+    "waf2_url": "http://localhost:8081",
+    "start_at_unix_ts": 1779856667.8866265,
+    "request_timeout": 30.0,
+    "max_connections": 128
+  },
+  "sampler_args": {
+    "mode": "docker-stats",
+    "pid": null,
+    "container_name": "waf2",
+    "interval": 2.0,
+    "duration_seconds": 40.0,
+    "out_dir": "/mnt/e/ctf/ai/mcp-guardrails-master/waf2/rag/eval/runs/2026-05-27-rq5-csic-full/20260527-123747",
+    "waf2_url": "http://localhost:8081",
+    "start_at_unix_ts": 1779856667.8866265
+  },
+  "steady_met": false,
+  "actual_steady_rps": 4.935082140964494,
+  "p95_jitter_pct": 148.42506683400524,
+  "target_rps": 5.0
+}

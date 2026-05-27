@@ -1,0 +1,19 @@
+{
+  "target_rps": 5.0,
+  "actual_steady_rps": 4.935082140964494,
+  "p95_jitter_pct": 148.42506683400524,
+  "steady_met": false,
+  "metrics": {
+    "\u7a33\u6001\u5e73\u5747 QPS": "4.94",
+    "Avg \u5ef6\u8fdf (ms)": "1161.49",
+    "P50 \u5ef6\u8fdf (ms)": "13.41",
+    "P95 \u5ef6\u8fdf (ms)": "10174.42",
+    "P99 \u5ef6\u8fdf (ms)": "22551.65",
+    "CPU \u5360\u7528 (%)": "8.30",
+    "\u5185\u5b58\u5360\u7528 (MB)": "217.28",
+    "\u7f13\u5b58\u547d\u4e2d\u7387 (%)": "97.89"
+  },
+  "steady_seconds": 30.192,
+  "driver_steady_count": 149,
+  "sampler_steady_rows": 8
+}
