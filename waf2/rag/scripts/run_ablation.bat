@@ -48,6 +48,7 @@ set "DS=%ROOT%\_dataset"
 
 set "MCP_HUB=http://localhost:4000"
 set "WAF2=http://localhost:8081"
+set "SCENARIOS=waf2\rag\eval\scenario-playbook\scenarios.jsonl"
 
 echo.
 echo === WAF Ablation Harness (Windows) — model=%MODEL% ===
@@ -106,6 +107,10 @@ node mcp-hub\scripts\run_waf1_on_mbench.mjs --jsonl "%BENIGNS%" --variant both -
 python waf2\rag\scripts\merge_mbench_layers.py --cases-dir "%OUT%" --dataset-dir "%DS%" --out-dir "%OUT%" --skip-waf2 --ablation-label "WAF1-only" || goto :fail
 python waf2\rag\scripts\report_mbench.py --merged "%OUT%\cases-mbench-merged.jsonl" --out "%OUT%\dual-layer-mbench-report.md" --ablation-label "WAF1-only" --append-to "%INDEX%" || goto :fail
 
+node mcp-hub\scripts\run_waf1_on_scenario_playbook.mjs --jsonl "%SCENARIOS%" --out-dir "%OUT%" || goto :fail
+python -c "open(r'%OUT%\cases-scenario-playbook-waf2.jsonl','w').close()"
+python waf2\rag\scripts\report_scenario_playbook.py --waf1-cases "%OUT%\cases-scenario-playbook-waf1-full.jsonl" --waf2-cases "%OUT%\cases-scenario-playbook-waf2.jsonl" --out "%OUT%\scenario-playbook-summary.md" || goto :fail
+
 REM ============================================================
 REM  Ablation 2 — WAF2-only
 REM ============================================================
@@ -121,6 +126,10 @@ python waf2\rag\scripts\run_waf2_on_mbench.py --waf2 "%WAF2%" --jsonl "%BENIGNS%
 
 python waf2\rag\scripts\merge_mbench_layers.py --cases-dir "%OUT%" --dataset-dir "%DS%" --out-dir "%OUT%" --skip-waf1 --ablation-label "WAF2-only" || goto :fail
 python waf2\rag\scripts\report_mbench.py --merged "%OUT%\cases-mbench-merged.jsonl" --out "%OUT%\dual-layer-mbench-report.md" --ablation-label "WAF2-only" --append-to "%INDEX%" || goto :fail
+
+python -c "open(r'%OUT%\cases-scenario-playbook-waf1-full.jsonl','w').close()"
+python waf2\rag\scripts\run_waf2_on_scenario_playbook.py --waf2 "%WAF2%" --jsonl "%SCENARIOS%" --out-dir "%OUT%" || goto :fail
+python waf2\rag\scripts\report_scenario_playbook.py --waf1-cases "%OUT%\cases-scenario-playbook-waf1-full.jsonl" --waf2-cases "%OUT%\cases-scenario-playbook-waf2.jsonl" --out "%OUT%\scenario-playbook-summary.md" || goto :fail
 
 REM ============================================================
 REM  Ablation 3 — Full (WAF1 + WAF2, rag=on react=on)
@@ -141,6 +150,10 @@ python waf2\rag\scripts\run_waf2_on_mbench.py --waf2 "%WAF2%" --jsonl "%BENIGNS%
 python waf2\rag\scripts\merge_mbench_layers.py --cases-dir "%OUT%" --dataset-dir "%DS%" --out-dir "%OUT%" --ablation-label "Full" || goto :fail
 python waf2\rag\scripts\report_mbench.py --merged "%OUT%\cases-mbench-merged.jsonl" --out "%OUT%\dual-layer-mbench-report.md" --ablation-label "Full" --append-to "%INDEX%" || goto :fail
 
+node mcp-hub\scripts\run_waf1_on_scenario_playbook.mjs --jsonl "%SCENARIOS%" --out-dir "%OUT%" || goto :fail
+python waf2\rag\scripts\run_waf2_on_scenario_playbook.py --waf2 "%WAF2%" --jsonl "%SCENARIOS%" --out-dir "%OUT%" || goto :fail
+python waf2\rag\scripts\report_scenario_playbook.py --waf1-cases "%OUT%\cases-scenario-playbook-waf1-full.jsonl" --waf2-cases "%OUT%\cases-scenario-playbook-waf2.jsonl" --out "%OUT%\scenario-playbook-summary.md" || goto :fail
+
 REM ============================================================
 REM  Ablation 4 — Full no-chain  (reuse ablation 3's WAF2)
 REM ============================================================
@@ -159,6 +172,10 @@ copy /Y "%ROOT%\3-full\cases-mbench-benign-rag-on.jsonl"  "%OUT%\" >nul
 python waf2\rag\scripts\merge_mbench_layers.py --cases-dir "%OUT%" --dataset-dir "%DS%" --out-dir "%OUT%" --ablation-label "Full no-chain" || goto :fail
 python waf2\rag\scripts\report_mbench.py --merged "%OUT%\cases-mbench-merged.jsonl" --out "%OUT%\dual-layer-mbench-report.md" --ablation-label "Full no-chain" --append-to "%INDEX%" || goto :fail
 
+node mcp-hub\scripts\run_waf1_on_scenario_playbook.mjs --jsonl "%SCENARIOS%" --out-dir "%OUT%" || goto :fail
+python waf2\rag\scripts\run_waf2_on_scenario_playbook.py --waf2 "%WAF2%" --jsonl "%SCENARIOS%" --out-dir "%OUT%" || goto :fail
+python waf2\rag\scripts\report_scenario_playbook.py --waf1-cases "%OUT%\cases-scenario-playbook-waf1-full.jsonl" --waf2-cases "%OUT%\cases-scenario-playbook-waf2.jsonl" --out "%OUT%\scenario-playbook-summary.md" || goto :fail
+
 REM ============================================================
 REM  Ablation 5 — Full no-dynSQL  (reuse ablation 3's WAF2)
 REM ============================================================
@@ -176,6 +193,10 @@ copy /Y "%ROOT%\3-full\cases-mbench-benign-rag-on.jsonl"  "%OUT%\" >nul
 
 python waf2\rag\scripts\merge_mbench_layers.py --cases-dir "%OUT%" --dataset-dir "%DS%" --out-dir "%OUT%" --ablation-label "Full no-dynSQL" || goto :fail
 python waf2\rag\scripts\report_mbench.py --merged "%OUT%\cases-mbench-merged.jsonl" --out "%OUT%\dual-layer-mbench-report.md" --ablation-label "Full no-dynSQL" --append-to "%INDEX%" || goto :fail
+
+node mcp-hub\scripts\run_waf1_on_scenario_playbook.mjs --jsonl "%SCENARIOS%" --out-dir "%OUT%" || goto :fail
+python waf2\rag\scripts\run_waf2_on_scenario_playbook.py --waf2 "%WAF2%" --jsonl "%SCENARIOS%" --out-dir "%OUT%" || goto :fail
+python waf2\rag\scripts\report_scenario_playbook.py --waf1-cases "%OUT%\cases-scenario-playbook-waf1-full.jsonl" --waf2-cases "%OUT%\cases-scenario-playbook-waf2.jsonl" --out "%OUT%\scenario-playbook-summary.md" || goto :fail
 
 REM ============================================================
 REM  Ablation 6 — Full no-RAG  (WAF2 rag_enabled=false; reuse WAF1 from 3)
@@ -201,6 +222,10 @@ copy /Y "%ROOT%\3-full\cases-mbench-benign-waf1-full.jsonl"    "%OUT%\" >nul
 python waf2\rag\scripts\merge_mbench_layers.py --cases-dir "%OUT%" --dataset-dir "%DS%" --out-dir "%OUT%" --ablation-label "Full no-RAG" || goto :fail
 python waf2\rag\scripts\report_mbench.py --merged "%OUT%\cases-mbench-merged.jsonl" --out "%OUT%\dual-layer-mbench-report.md" --ablation-label "Full no-RAG" --append-to "%INDEX%" || goto :fail
 
+node mcp-hub\scripts\run_waf1_on_scenario_playbook.mjs --jsonl "%SCENARIOS%" --out-dir "%OUT%" || goto :fail
+python waf2\rag\scripts\run_waf2_on_scenario_playbook.py --waf2 "%WAF2%" --jsonl "%SCENARIOS%" --out-dir "%OUT%" || goto :fail
+python waf2\rag\scripts\report_scenario_playbook.py --waf1-cases "%OUT%\cases-scenario-playbook-waf1-full.jsonl" --waf2-cases "%OUT%\cases-scenario-playbook-waf2.jsonl" --out "%OUT%\scenario-playbook-summary.md" || goto :fail
+
 REM ============================================================
 REM  Ablation 7 — Full no-ReAct  (WAF2 react=false; reuse WAF1 from 3)
 REM ============================================================
@@ -224,6 +249,10 @@ copy /Y "%ROOT%\3-full\cases-mbench-benign-waf1-full.jsonl"    "%OUT%\" >nul
 
 python waf2\rag\scripts\merge_mbench_layers.py --cases-dir "%OUT%" --dataset-dir "%DS%" --out-dir "%OUT%" --ablation-label "Full no-ReAct" || goto :fail
 python waf2\rag\scripts\report_mbench.py --merged "%OUT%\cases-mbench-merged.jsonl" --out "%OUT%\dual-layer-mbench-report.md" --ablation-label "Full no-ReAct" --append-to "%INDEX%" || goto :fail
+
+node mcp-hub\scripts\run_waf1_on_scenario_playbook.mjs --jsonl "%SCENARIOS%" --out-dir "%OUT%" || goto :fail
+python waf2\rag\scripts\run_waf2_on_scenario_playbook.py --waf2 "%WAF2%" --jsonl "%SCENARIOS%" --out-dir "%OUT%" || goto :fail
+python waf2\rag\scripts\report_scenario_playbook.py --waf1-cases "%OUT%\cases-scenario-playbook-waf1-full.jsonl" --waf2-cases "%OUT%\cases-scenario-playbook-waf2.jsonl" --out "%OUT%\scenario-playbook-summary.md" || goto :fail
 
 REM ============================================================
 REM  Done

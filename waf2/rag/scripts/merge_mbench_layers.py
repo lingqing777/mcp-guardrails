@@ -263,6 +263,7 @@ def merge_split(
                 "detected_namespace": on.get("detected_namespace", ""),
                 "latency_ms": on.get("latency_ms", 0),
                 "waf2_evaluated_step": on.get("waf2_evaluated_step"),
+                "route": on.get("route", ""),
                 **({"_skipped": True} if skip_waf2 else {}),
             },
             "rag_off": {
@@ -271,6 +272,7 @@ def merge_split(
                 "detected_namespace": off.get("detected_namespace", ""),
                 "latency_ms": off.get("latency_ms", 0),
                 "waf2_evaluated_step": off.get("waf2_evaluated_step"),
+                "route": off.get("route", ""),
                 **({"_skipped": True} if skip_waf2 else {}),
             },
             "waf1_union_blocked": waf1_union_blocked,
