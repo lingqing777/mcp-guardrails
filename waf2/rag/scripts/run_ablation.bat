@@ -26,6 +26,10 @@ REM ============================================================
 
 setlocal enabledelayedexpansion
 
+REM -------- UTF-8 console (required for Chinese Windows / code page 936) --------
+chcp 65001 >nul 2>&1
+set "PYTHONUTF8=1"
+
 REM -------- args --------
 set "MODEL=%~1"
 if "%MODEL%"=="" set "MODEL=qwen3-1_5b"
@@ -76,7 +80,7 @@ if errorlevel 1 (
 echo [pre-flight] mcp-hub + WAF2 reachable, cookies stored in %COOKIES%
 
 REM -------- benign sampling (equal-count, seeded) --------
-python -c "import random,sys; random.seed(42); rows=[l for l in open('%BENIGNS_SRC%',encoding='utf-8') if l.strip()]; atk=sum(1 for l in open('%ATTACKS%',encoding='utf-8') if l.strip()); n=min(atk,len(rows)); picked=random.sample(rows,n); open(r'%BENIGNS%','w',encoding='utf-8').writelines(picked); print(f'[sample] {n}/{len(rows)} benigns -> %BENIGNS%')"
+python -c "import random,sys; random.seed(42); rows=[l for l in open(r'%BENIGNS_SRC%',encoding='utf-8') if l.strip()]; atk=sum(1 for l in open(r'%ATTACKS%',encoding='utf-8') if l.strip()); n=min(atk,len(rows)); picked=random.sample(rows,n); open(r'%BENIGNS%','w',encoding='utf-8').writelines(picked); print(f'[sample] {n}/{len(rows)} benigns -> ' + r'%BENIGNS%')"
 if errorlevel 1 (
   echo ERROR: benign sampling failed.
   exit /b 3
