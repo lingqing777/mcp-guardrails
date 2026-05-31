@@ -1,0 +1,8 @@
+{
+  "total_merged": 300,
+  "skipped_layers": [
+    "waf1"
+  ],
+  "ablation_label": "WAF2-only",
+  "misses": {}
+}
