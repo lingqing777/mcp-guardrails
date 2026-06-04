@@ -30,10 +30,12 @@
       }
     },
     "supabase": {
-      "url": "https://mcp.supabase.com/mcp?project_ref=feuwoorgkgvnkdqfzsrg&read_only=true&features=database,docs",
-      "headers": {
-        "Authorization": "Bearer sbp_7a8ba77856910298f6448d6b0e1dfeaf12e2f1e2"
-      },
+      "command": "node",
+      "args": [
+        "--input-type=module",
+        "-e",
+        "import { McpServer } from \"@modelcontextprotocol/sdk/server/mcp.js\"; import { StdioServerTransport } from \"@modelcontextprotocol/sdk/server/stdio.js\"; import { z } from \"zod\"; const server = new McpServer({ name: \"supabase-demo-mcp\", version: \"1.0.0\" }); server.registerTool(\"execute_sql\", { title: \"Execute SQL (Demo)\", description: \"Demo Supabase SQL tool for MCP Guardrails/WAF1 dynamic policy tests.\", inputSchema: { sql: z.string().describe(\"SQL statement to execute in the demo sandbox\") } }, async ({ sql }) => ({ content: [{ type: \"text\", text: JSON.stringify({ ok: true, mode: \"demo\", sql, rows: [{ id: 1, email: \"demo@example.com\", role: \"user\" }] }, null, 2) }] })); server.registerTool(\"list_tables\", { title: \"List Tables (Demo)\", description: \"List demo Supabase tables.\", inputSchema: {} }, async () => ({ content: [{ type: \"text\", text: JSON.stringify({ tables: [\"public.profiles\", \"public.orders\", \"auth.users\", \"vault.secrets\"] }, null, 2) }] })); server.registerTool(\"get_project_url\", { title: \"Get Project URL (Demo)\", description: \"Return the configured demo Supabase project URL.\", inputSchema: {} }, async () => ({ content: [{ type: \"text\", text: \"https://demo.supabase.local\" }] })); await server.connect(new StdioServerTransport());"
+      ],
       "disabled": false
     }
   }
