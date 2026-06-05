@@ -2147,6 +2147,7 @@ REST_BASE_URL=<span class="string">http://localhost:8081</span></code>
         let WAF1_URL = 'http://localhost:4000';
         let WAF2_URL = 'http://localhost:8081';
         let REFRESH_INTERVAL = 5000;
+        const ATTACK_LOG_LIMIT = 60;
         let refreshTimer = null;
 
         // 数据存储
@@ -2368,7 +2369,7 @@ REST_BASE_URL=<span class="string">http://localhost:8081</span></code>
             });
             allDetections = all;
 
-            renderDetectionList('all-detections', all.slice(0, 50), 'all');
+            renderDetectionList('all-detections', all.slice(0, ATTACK_LOG_LIMIT), 'all');
         }
 
         function renderBarChart(containerId, data, type) {
@@ -2417,8 +2418,8 @@ REST_BASE_URL=<span class="string">http://localhost:8081</span></code>
                 const severity = d.severity || labels.severity || 'medium';
                 const category = d.category || d.detected_by || 'unknown';
                 const reason = d.reason || d.message || '检测到威胁';
-                // WAF1 用 ts (毫秒时间戳) 或 labels.timestamp, WAF2 用 timestamp
-                const timestamp = d.timestamp || labels.timestamp || (d.ts ? new Date(d.ts).toISOString() : null);
+                // WAF1 用 ts (毫秒时间戳), WAF2 用 timestamp
+                const timestamp = d.timestamp || (d.ts ? new Date(d.ts).toISOString() : null) || labels.timestamp;
                 const owasp = d.owasp || labels.owasp || '-';
                 const mitre = d.mitre || labels.mitreTactic || '-';
                 const direction = d.direction || labels.direction || '-';

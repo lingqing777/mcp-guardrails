@@ -6,6 +6,32 @@ import {
   updateWaf1Config,
   validateToolCall,
 } from './index.js';
+import {
+  MAX_DETECTIONS,
+  RECENT_DETECTIONS_LIMIT,
+  StatsCollector,
+} from './stats.js';
+
+describe('WAF1 detection log window', () => {
+  it('returns the full retained detection window to stats and dashboard consumers', () => {
+    const collector = new StatsCollector();
+
+    for (let i = 0; i < MAX_DETECTIONS + 25; i++) {
+      collector.addDetection({
+        category: 'xss',
+        reason: `attack-${i}`,
+      });
+    }
+
+    const stats = collector.getStats();
+    const dashboard = collector.getDashboardData();
+
+    expect(stats.detections).toHaveLength(RECENT_DETECTIONS_LIMIT);
+    expect(dashboard.recentDetections).toHaveLength(RECENT_DETECTIONS_LIMIT);
+    expect(stats.detections[0].reason).toBe('attack-25');
+    expect(dashboard.recentDetections[RECENT_DETECTIONS_LIMIT - 1].reason).toBe(`attack-${MAX_DETECTIONS + 24}`);
+  });
+});
 
 describe('WAF1 Supabase dynamic policy', () => {
   beforeEach(() => {
