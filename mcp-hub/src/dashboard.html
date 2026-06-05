@@ -169,6 +169,13 @@
             .two-cols { grid-template-columns: 1fr; }
         }
 
+        @media (max-width: 768px) {
+            #all-detections {
+                height: 62vh;
+                min-height: 360px;
+            }
+        }
+
         .panel {
             background: rgba(255, 255, 255, 0.05);
             border: 1px solid rgba(255, 255, 255, 0.1);
@@ -238,6 +245,11 @@
         .detection-list {
             max-height: 400px;
             overflow-y: auto;
+        }
+
+        #all-detections {
+            height: clamp(560px, 68vh, 760px);
+            max-height: none;
         }
 
         .detection-item {

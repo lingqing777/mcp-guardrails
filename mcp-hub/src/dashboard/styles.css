@@ -529,6 +529,11 @@ body > * { position: relative; z-index: 1; }
     scrollbar-color: var(--bg-surface-3) transparent;
 }
 
+#all-detections {
+    height: clamp(560px, 68vh, 760px);
+    max-height: none;
+}
+
 .detection-list::-webkit-scrollbar { width: 4px; }
 .detection-list::-webkit-scrollbar-track { background: transparent; }
 .detection-list::-webkit-scrollbar-thumb { background: var(--bg-surface-3); border-radius: 2px; }
@@ -2254,6 +2259,10 @@ body > * { position: relative; z-index: 1; }
     .inspector-sidebar { width: 100%; }
     .grid { grid-template-columns: 1fr 1fr; }
     .provider-card-grid { grid-template-columns: repeat(2, 1fr); }
+    #all-detections {
+        height: 62vh;
+        min-height: 360px;
+    }
 }
 
 /* ==================== 态势感知面板 ==================== */
