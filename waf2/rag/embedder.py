@@ -36,7 +36,7 @@ class OnnxEmbedder:
         config_path = self.model_dir / "config.json"
         if not config_path.exists():
             raise FileNotFoundError(
-                f"缺少 config.json: {config_path}; 请先运行 scripts/export_onnx.py"
+                f"缺少 config.json: {config_path}; 请先运行 ./waf2/rag/scripts/export_onnx.py"
             )
 
         config = json.loads(config_path.read_text(encoding="utf-8"))
