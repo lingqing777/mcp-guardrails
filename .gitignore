@@ -14,6 +14,9 @@ build/
 # IDE
 .idea/
 .vscode/
+.agents/
+.claude/
+.codex/
 *.swp
 *.swo
 .DS_Store
@@ -22,6 +25,7 @@ build/
 *.log
 logs/
 waf2_log.json
+thesis_tables.md
 
 # Config (may contain secrets)
 config.json
@@ -31,6 +35,8 @@ config.json
 
 # Keep example config
 !config.example.json
+!waf2/rag/data/config.json
+!waf2/rag/data/model/config.json
 
 # Runtime
 *.pid
@@ -39,6 +45,7 @@ config.json
 # Cache
 .cache/
 *.cache
+.firecrawl/
 
 # Testing
 coverage/
@@ -47,6 +54,14 @@ coverage/
 
 # Docker
 docker-compose.override.yml
+
+# Local assistant/spec tooling
+openspec/
+mcp-hub/openspec/
+docs/superpowers/
+
+# Nested local copies
+mcp-guardrails/
 
 # ==================== WAF2 RAG 数据资产策略 ====================
 # 入仓库 (跨平台二进制 + 关键产物, 总计 ~103M):
@@ -62,6 +77,7 @@ waf2/rag/data/raw/
 # 评估集 / 临时产物 (避免污染 KB)
 waf2/rag/data/eval/
 waf2/rag/data/processed/*.tmp.jsonl
+waf2/rag/eval/runs/
 
 # CSIC 2010 数据集 (29M, 评委从 Kaggle 自下: 见 eval-report.md)
 waf2/rag/eval/csic2010/

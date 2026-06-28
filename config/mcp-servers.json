@@ -1,40 +1,22 @@
 {
   "mcpServers": {
-    "filesystem": {
-      "command": "/usr/bin/npx",
+    "filesystem-example": {
+      "displayName": "Filesystem Example",
+      "command": "npx",
       "args": [
         "-y",
         "@modelcontextprotocol/server-filesystem",
-        "/home/q1n9"
-      ]
-    },
-    "wordpress": {
-      "command": "docker",
-      "args": [
-        "exec",
-        "-i",
-        "wordpress",
-        "wp",
-        "--allow-root",
-        "mcp-adapter",
-        "serve",
-        "--server=mcp-adapter-default-server",
-        "--user=admin"
+        "/path/to/allowed/root"
       ],
-      "disabled": false
+      "disabled": true
     },
-    "woocommerce": {
-      "url": "http://localhost:3000/wp-json/woocommerce/mcp",
+    "supabase-example": {
+      "displayName": "Supabase Example",
+      "url": "https://mcp.supabase.com/mcp?project_ref=YOUR_PROJECT_REF&read_only=true&features=database,docs",
       "headers": {
-        "X-MCP-API-Key": "ck_b0d13486896d6160c32386f0749e11878be17457:cs_ce606ffc0eca0d298ca9e55b91eade325dd77bb8"
-      }
-    },
-    "supabase": {
-      "url": "https://mcp.supabase.com/mcp?project_ref=feuwoorgkgvnkdqfzsrg&read_only=true&features=database,docs",
-      "headers": {
-        "Authorization": "Bearer sbp_7a8ba77856910298f6448d6b0e1dfeaf12e2f1e2"
+        "Authorization": "Bearer YOUR_SUPABASE_ACCESS_TOKEN"
       },
-      "disabled": false
+      "disabled": true
     }
   }
 }

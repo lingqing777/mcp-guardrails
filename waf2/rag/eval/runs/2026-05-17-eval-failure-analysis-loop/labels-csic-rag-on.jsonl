@@ -1,1 +1,0 @@
-{"case_id": "csic:rag-on:8fab18496f1a", "dataset": "csic", "round_or_split": "rag-on", "record_kind": "false_negative", "rule_id": "R2", "layer": "local_score_low", "cause_hint": "social_eng_no_marker", "fix_hint": "fath_judge_wrap+field_path_boost", "confidence": "medium"}

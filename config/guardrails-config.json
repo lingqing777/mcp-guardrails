@@ -8,7 +8,10 @@
       "xss": true,
       "pathTraversal": true,
       "sensitiveFiles": true
-    }
+    },
+    "callChainEnabled": true,
+    "dynamicPolicyEnabled": false,
+    "rbacArgsEnabled": true
   },
   "waf2": {
     "enabled": true,
@@ -16,20 +19,13 @@
     "llm": {
       "provider": "qwen",
       "model": "qwen-turbo",
-      "baseUrl": "http://host.docker.internal:11434/v1",
-      "format": "openai",
-      "providerLocality": "local",
-      "privacyMode": "local_only",
-      "localFirstEnabled": true,
       "apiKey": "",
       "timeout": 30000
     },
     "features": {
       "requestAnalysis": true,
       "responseAnalysis": true,
-      "cache": true,
-      "localAttackScore": true,
-      "localFastPass": true
+      "cache": true
     }
   },
   "mcpHub": {
