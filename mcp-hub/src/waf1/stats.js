@@ -73,6 +73,9 @@ export const MITRE_MAPPING = {
   supabaseCallChain: 'T1041',
 };
 
+export const MAX_DETECTIONS = 100;
+export const RECENT_DETECTIONS_LIMIT = MAX_DETECTIONS;
+
 /**
  * 统计收集器
  */
@@ -136,7 +139,7 @@ export class StatsCollector {
       ...detection,
       ts: Date.now()
     });
-    if (this.stats.detections.length > 100) {
+    if (this.stats.detections.length > MAX_DETECTIONS) {
       this.stats.detections.shift();
     }
   }
@@ -170,7 +173,7 @@ export class StatsCollector {
   getStats() {
     return {
       ...this.stats,
-      detections: this.stats.detections.slice(-20),
+      detections: this.stats.detections.slice(-RECENT_DETECTIONS_LIMIT),
     };
   }
 
@@ -220,7 +223,7 @@ export class StatsCollector {
       },
       detectors: this.stats.blockedByDetector,
       rules: this.stats.blockedByRule,
-      recentDetections: this.stats.detections.slice(-10).map(d => ({
+      recentDetections: this.stats.detections.slice(-RECENT_DETECTIONS_LIMIT).map(d => ({
         ...d,
         labels: this.generateLabels(d),
       })),

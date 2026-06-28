@@ -38,6 +38,7 @@ const LLM_PROVIDERS = {
 let WAF1_URL = 'http://localhost:4000';
 let WAF2_URL = 'http://localhost:8081';
 let REFRESH_INTERVAL = 5000;
+const ATTACK_LOG_LIMIT = 60;
 let refreshTimer = null;
 
 // 数据存储
@@ -755,7 +756,7 @@ function updateDetectionsPanel() {
     const waf1Detections = waf1Data?.recentDetections || waf1Data?.recent_detections || [];
     const waf2Detections = waf2Data?.recent_detections || [];
 
-    allDetections = mergeDetections(waf1Detections, waf2Detections, 50);
+    allDetections = mergeDetections(waf1Detections, waf2Detections, ATTACK_LOG_LIMIT);
     renderDetectionList('all-detections', allDetections, 'all');
 }
 
@@ -2169,12 +2170,17 @@ function monitorUpdateLogStream(waf1, waf2) {
     if (!container) return;
 
     const entries = [];
+    const getDetectionTime = (d) => d.timestamp || (d.ts ? new Date(d.ts).toISOString() : null) || d.labels?.timestamp || null;
+    const clearRows = () => {
+        Array.from(container.children).forEach(c => { if (c !== emptyEl) c.remove(); });
+    };
 
     if (waf1 && Array.isArray(waf1.recentDetections)) {
         waf1.recentDetections.forEach((d, i) => {
+            const time = getDetectionTime(d);
             entries.push({
-                id: `w1-${d.timestamp || i}`,
-                time: d.timestamp,
+                id: `w1-${d.ts || time || i}-${i}`,
+                time,
                 source: 'WAF1',
                 category: d.category || d.labels?.category || 'unknown',
                 severity: d.severity || d.labels?.severity || 'medium',
@@ -2185,9 +2191,10 @@ function monitorUpdateLogStream(waf1, waf2) {
 
     if (waf2 && Array.isArray(waf2.recent_detections)) {
         waf2.recent_detections.forEach((d, i) => {
+            const time = getDetectionTime(d);
             entries.push({
-                id: `w2-${d.timestamp || i}`,
-                time: d.timestamp,
+                id: `w2-${d.ts || time || i}-${i}`,
+                time,
                 source: 'WAF2',
                 category: d.category || d.type || 'unknown',
                 severity: d.severity || 'medium',
@@ -2202,10 +2209,12 @@ function monitorUpdateLogStream(waf1, waf2) {
         return tb - ta;
     });
 
-    const display = entries.slice(0, 50);
+    const display = entries.slice(0, ATTACK_LOG_LIMIT);
     if (countEl) countEl.textContent = entries.length;
 
     if (display.length === 0) {
+        clearRows();
+        monitorPrevLogIds = new Set();
         if (emptyEl) emptyEl.style.display = 'flex';
         return;
     }
@@ -2227,8 +2236,7 @@ function monitorUpdateLogStream(waf1, waf2) {
         fragment.appendChild(row);
     });
 
-    const children = Array.from(container.children);
-    children.forEach(c => { if (c !== emptyEl) c.remove(); });
+    clearRows();
     container.insertBefore(fragment, emptyEl);
     monitorPrevLogIds = newIds;
 }

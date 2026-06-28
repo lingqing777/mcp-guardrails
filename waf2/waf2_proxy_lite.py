@@ -145,6 +145,9 @@ llm_cache = LLMCache()
 
 # ==================== 统计信息 ====================
 
+MAX_DETECTIONS = 100
+DEFAULT_DETECTIONS_LIMIT = MAX_DETECTIONS
+
 stats = {
     'total': 0,
     'passed': 0,
@@ -1182,7 +1185,7 @@ def parse_llm_result(result: str, direction: str) -> Dict[str, Any]:
 def log_detection(data: Dict):
     data['timestamp'] = datetime.now().isoformat()
     stats['detections'].append(data)
-    if len(stats['detections']) > 100:
+    if len(stats['detections']) > MAX_DETECTIONS:
         stats['detections'].pop(0)
     try:
         with open(LOG_FILE, "a", encoding="utf-8") as f:
@@ -1426,13 +1429,13 @@ async def get_dashboard():
             'salvaged': stats['agent_salvaged'],
             'tools_available': list(AGENT_TOOLS.keys()),
         },
-        'recent_detections': stats['detections'][-10:],
+        'recent_detections': stats['detections'][-DEFAULT_DETECTIONS_LIMIT:],
     }
 
 
 @app.get("/waf2/detections")
 async def get_detections():
-    return stats['detections'][-20:]
+    return stats['detections'][-DEFAULT_DETECTIONS_LIMIT:]
 
 
 @app.post("/waf2/reset")
