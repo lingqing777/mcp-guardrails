@@ -23,7 +23,9 @@ const DANGEROUS_CHAINS = [
         if (/send|post|upload|write|push|forward/i.test(t)) return true;
         // 外发渠道:Github gist / pastebin / snippet / webhook / S3 等也是 exfil 通道
         if (/gist|paste|snippet|webhook|bucket\b|s3_/i.test(t)) return true;
-        if (/(^|__)create_(?:gist|paste|snippet|repository|repo|issue|comment|file)/i.test(t)) return true;
+        if (/(^|__)create_(?:gist|paste|snippet|repository|repo|issue|comment|file|or_update_file|pull_request)/i.test(t)) return true;
+        // GitHub 其他外发渠道: issue 评论/更新、推送/编辑文件、PR review 等
+        if (/(^|__)(add_.*comment|update_issue|push_files|edit_file|update_file|create_review|submit_review)/i.test(t)) return true;
         if (/http_request|http_post|http-client|webhook|fetch_url|request_url/i.test(t)) {
           const a = call.args || {};
           const method = String(a.method || '').toUpperCase();
@@ -38,6 +40,10 @@ const DANGEROUS_CHAINS = [
     desc: '访问凭证后进行网络请求',
     steps: [
       { match: (call) => {
+        const t = String(call.tool || '');
+        // step1 只对"读取/访问"类工具匹配; 外发工具(http_request/create_*/send 等)不作 step1,
+        // 避免连续外发调用(如场景二多次 http_request)被误判为"访问凭证后外发"
+        if (/http_request|http_post|http-client|webhook|fetch_url|request_url|(^|__)create_|(^|__)add_|(^|__)update_|(^|__)push_|send|post|upload|write|forward/i.test(t)) return false;
         const s = JSON.stringify(call.args);
         return /password|secret|key|token|credential|\.env|\.ssh|id_rsa|\.gnupg|private-keys/i.test(s);
       }},
@@ -47,7 +53,9 @@ const DANGEROUS_CHAINS = [
         if (/https?:\/\/|curl|wget|fetch|request/i.test(s)) return true;
         // 外发渠道(同 data_exfiltration step 2)
         if (/gist|paste|snippet|webhook|bucket\b|s3_/i.test(t)) return true;
-        if (/(^|__)create_(?:gist|paste|snippet|repository|repo|issue|comment|file)/i.test(t)) return true;
+        if (/(^|__)create_(?:gist|paste|snippet|repository|repo|issue|comment|file|or_update_file|pull_request)/i.test(t)) return true;
+        // GitHub 其他外发渠道: issue 评论/更新、推送/编辑文件、PR review 等
+        if (/(^|__)(add_.*comment|update_issue|push_files|edit_file|update_file|create_review|submit_review)/i.test(t)) return true;
         return false;
       }},
     ],
@@ -134,8 +142,8 @@ export class CallChainTracker {
         }
 
         if (stepIdx < 0) {
-          // 检测到危险调用链后，清除历史，防止后续请求持续触发
-          this.history = [];
+          // 检测到危险调用链后保留历史，使重试外发调用仍能被同一调用链触发拦截。
+          // (原设计清空历史以防级联告警，但会导致攻击者立即重试绕过：清空后无前置读记录)
           return {
             detected: true,
             chain: chain.name,

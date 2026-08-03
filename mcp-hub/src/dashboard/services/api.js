@@ -151,6 +151,66 @@ export const serversApi = {
     }
 };
 
+// ==================== 演示 API ====================
+
+export const demoApi = {
+    async getScenarios() {
+        return request(`${config.waf1Url}/api/demo/scenarios`);
+    },
+
+    /**
+     * SSE 流式演示聊天。返回一个可取消的控制器。
+     * onEvent(eventData) 每收到一个 SSE data 事件回调一次。
+     * 用 fetch + ReadableStream 解析 SSE (EventSource 不支持 POST)。
+     */
+    async chat(scenarioId, wafEnabled, { onEvent, onDone, onError } = {}) {
+        const controller = new AbortController();
+        const resp = await fetch(`${config.waf1Url}/api/demo/chat`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            credentials: 'include',
+            body: JSON.stringify({ scenarioId, wafEnabled }),
+            signal: controller.signal,
+        });
+
+        if (!resp.ok) {
+            const err = new Error(`HTTP ${resp.status}`);
+            err.status = resp.status;
+            try { err.data = await resp.json(); } catch (e) { err.data = null; }
+            if (onError) onError(err);
+            return controller;
+        }
+
+        const reader = resp.body.getReader();
+        const decoder = new TextDecoder();
+        let buffer = '';
+        try {
+            while (true) {
+                const { done, value } = await reader.read();
+                if (done) break;
+                buffer += decoder.decode(value, { stream: true });
+                let idx;
+                while ((idx = buffer.indexOf('\n\n')) >= 0) {
+                    const block = buffer.slice(0, idx);
+                    buffer = buffer.slice(idx + 2);
+                    for (const line of block.split('\n')) {
+                        if (!line.startsWith('data:')) continue;
+                        const payload = line.slice(5).trim();
+                        if (!payload) continue;
+                        let data;
+                        try { data = JSON.parse(payload); } catch (e) { continue; }
+                        if (onEvent) onEvent(data);
+                        if (data.event === 'done' && onDone) onDone(data);
+                    }
+                }
+            }
+        } catch (e) {
+            if (e.name !== 'AbortError' && onError) onError(e);
+        }
+        return controller;
+    }
+};
+
 // ==================== MCP Server 配置管理 API ====================
 
 export const mcpConfigApi = {
@@ -231,6 +291,7 @@ export default {
     config: configApi,
     servers: serversApi,
     mcpConfig: mcpConfigApi,
+    demo: demoApi,
     getConfig,
     setConfig
 };

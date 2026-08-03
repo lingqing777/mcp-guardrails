@@ -55,6 +55,7 @@
             <div class="tab" data-tab="waf2">WAF2 详情</div>
             <div class="tab" data-tab="detections">检测记录</div>
             <div class="tab" data-tab="config">配置</div>
+            <div class="tab" data-tab="demo">演示</div>
             <div class="tab-indicator"></div>
         </div>
 
@@ -975,6 +976,38 @@ REST_BASE_URL=<span class="string">http://localhost:8081</span></code>
                 </div>
             </div>
 
+        </div>
+
+        <!-- 演示面板: 真实 LLM Agent + WAF 对比 -->
+        <div id="demo-panel" class="tab-content" style="display: none;">
+            <div class="demo-layout">
+                <div class="demo-controls">
+                    <div class="demo-controls-title">
+                        <span class="demo-controls-icon">▶</span> 演示场景
+                    </div>
+                    <div class="demo-controls-sub">点击按钮自动发送预设提示词，观察 WAF 开/关下的差异</div>
+                    <div class="demo-scenarios" id="demo-scenarios">
+                        <div class="demo-loading">加载场景中…</div>
+                    </div>
+                    <div class="demo-legend">
+                        <span class="demo-legend-item"><span class="dot dot-green"></span>放行</span>
+                        <span class="demo-legend-item"><span class="dot dot-red"></span>拦截</span>
+                        <span class="demo-legend-item"><span class="dot dot-amber"></span>工具调用</span>
+                    </div>
+                </div>
+                <div class="demo-chat">
+                    <div class="demo-chat-header">
+                        <div class="demo-chat-title">
+                            <span class="demo-status-dot" id="demo-status-dot"></span>
+                            <span id="demo-chat-label">AI Agent 演示</span>
+                        </div>
+                        <button id="demo-retry" class="demo-retry-btn" disabled>重试</button>
+                    </div>
+                    <div class="demo-chat-body" id="demo-chat-body">
+                        <div class="demo-empty">选择左侧场景与 WAF 状态开始演示</div>
+                    </div>
+                </div>
+            </div>
         </div>
     </div>
 

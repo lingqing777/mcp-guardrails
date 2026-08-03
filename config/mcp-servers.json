@@ -1,40 +1,27 @@
 {
   "mcpServers": {
-    "filesystem": {
-      "command": "/usr/bin/npx",
+    "http-client": {
+      "command": "node",
       "args": [
-        "-y",
-        "@modelcontextprotocol/server-filesystem",
-        "/home/q1n9"
+        "/mnt/e/ctf/ai/MCP/http-client-mcp-server-master/server.js"
       ]
     },
-    "wordpress": {
-      "command": "docker",
+    "server-github": {
+      "displayName": "server-github",
+      "command": "npx",
       "args": [
-        "exec",
-        "-i",
-        "wordpress",
-        "wp",
-        "--allow-root",
-        "mcp-adapter",
-        "serve",
-        "--server=mcp-adapter-default-server",
-        "--user=admin"
+        "-y",
+        "@modelcontextprotocol/server-github"
       ],
-      "disabled": false
-    },
-    "woocommerce": {
-      "url": "http://localhost:3000/wp-json/woocommerce/mcp",
-      "headers": {
-        "X-MCP-API-Key": "ck_b0d13486896d6160c32386f0749e11878be17457:cs_ce606ffc0eca0d298ca9e55b91eade325dd77bb8"
+      "env": {
+        "GITHUB_PERSONAL_ACCESS_TOKEN": "ghp_YOUR_GITHUB_PAT_HERE"
       }
     },
-    "supabase": {
-      "url": "https://mcp.supabase.com/mcp?project_ref=feuwoorgkgvnkdqfzsrg&read_only=true&features=database,docs",
-      "headers": {
-        "Authorization": "Bearer sbp_7a8ba77856910298f6448d6b0e1dfeaf12e2f1e2"
-      },
-      "disabled": false
+    "file_read_MCP": {
+      "command": "python",
+      "args": [
+        "/mnt/e/ctf/ai/MCP/ASI02/file_read_MCP.py"
+      ]
     }
   }
 }

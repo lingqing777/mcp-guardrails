@@ -15,3 +15,4 @@ export {
   registerRestartRoutes
 } from './core.js';
 export { registerMcpConfigRoutes } from './mcp-config.js';
+export { registerDemoRoutes } from './demo.js';
