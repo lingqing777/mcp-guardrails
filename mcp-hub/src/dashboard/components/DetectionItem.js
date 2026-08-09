@@ -64,9 +64,8 @@ export function renderDetectionItem(detection, source = 'all') {
     const severity = detection.severity || labels.severity || 'medium';
     const category = detection.category || detection.detected_by || 'unknown';
     const reason = detection.reason || detection.message || '检测到威胁';
-    const timestamp = detection.timestamp ||
-                      (detection.ts ? new Date(detection.ts).toISOString() : null) ||
-                      labels.timestamp;
+    const timestamp = detection.timestamp || labels.timestamp ||
+                      (detection.ts ? new Date(detection.ts).toISOString() : null);
     const owasp = detection.owasp || labels.owasp || '-';
     const mitre = detection.mitre || labels.mitreTactic || '-';
     const direction = detection.direction || labels.direction || '-';
