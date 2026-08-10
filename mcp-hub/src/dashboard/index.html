@@ -981,20 +981,41 @@ REST_BASE_URL=<span class="string">http://localhost:8081</span></code>
         <!-- 演示面板: 真实 LLM Agent + WAF 对比 -->
         <div id="demo-panel" class="tab-content" style="display: none;">
             <div class="demo-layout">
-                <div class="demo-controls">
-                    <div class="demo-controls-title">
-                        <span class="demo-controls-icon">▶</span> 演示场景
+                <!-- 左侧: 场景控制 / 流程图 -->
+                <div class="demo-controls" id="demo-controls">
+                    <!-- 场景列表视图 -->
+                    <div class="demo-view" id="demo-view-list">
+                        <div class="demo-controls-title">
+                            <span class="demo-controls-icon">▶</span> 演示场景
+                        </div>
+                        <div class="demo-controls-sub">点击按钮自动发送预设提示词，观察 WAF 开/关下的差异</div>
+                        <div class="demo-scenarios" id="demo-scenarios">
+                            <div class="demo-loading">加载场景中…</div>
+                        </div>
+                        <div class="demo-legend">
+                            <span class="demo-legend-item"><span class="dot dot-green"></span>放行</span>
+                            <span class="demo-legend-item"><span class="dot dot-red"></span>拦截</span>
+                            <span class="demo-legend-item"><span class="dot dot-amber"></span>工具调用</span>
+                        </div>
                     </div>
-                    <div class="demo-controls-sub">点击按钮自动发送预设提示词，观察 WAF 开/关下的差异</div>
-                    <div class="demo-scenarios" id="demo-scenarios">
-                        <div class="demo-loading">加载场景中…</div>
-                    </div>
-                    <div class="demo-legend">
-                        <span class="demo-legend-item"><span class="dot dot-green"></span>放行</span>
-                        <span class="demo-legend-item"><span class="dot dot-red"></span>拦截</span>
-                        <span class="demo-legend-item"><span class="dot dot-amber"></span>工具调用</span>
+
+                    <!-- 流程图视图 -->
+                    <div class="demo-view demo-view-flow" id="demo-view-flow" style="display:none;">
+                        <div class="demo-flow-header">
+                            <button class="demo-flow-back" onclick="backToDemoList()">
+                                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M19 12H5M12 19l-7-7 7-7"/></svg>
+                                返回演示场景
+                            </button>
+                            <div class="demo-flow-status" id="demo-flow-status"></div>
+                        </div>
+                        <div class="demo-flow-title" id="demo-flow-title">攻击流程图</div>
+                        <div class="demo-flow-container" id="demo-flow-container">
+                            <!-- 流程图动态渲染 -->
+                        </div>
                     </div>
                 </div>
+
+                <!-- 右侧: 聊天区 -->
                 <div class="demo-chat">
                     <div class="demo-chat-header">
                         <div class="demo-chat-title">

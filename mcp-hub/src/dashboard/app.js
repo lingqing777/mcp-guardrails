@@ -2455,9 +2455,9 @@ function monitorUpdateCompareChart(waf1, waf2) {
     if (w2El) monitorAnimateValue(w2El, parseInt(w2El.textContent) || 0, w2Total);
 
     const w1Cat = {};
-    const w1Rules = waf1?.stats?.byRule || waf1?.rules || waf1?.by_category || {};
+    const w1Rules = waf1?.last24h?.byCategory || waf1?.stats?.byRule || waf1?.by_category || {};
     Object.entries(w1Rules).forEach(([k, v]) => { if (v > 0) w1Cat[k] = v; });
-    const w1Det = waf1?.stats?.byDetector || {};
+    const w1Det = waf1?.detectors || waf1?.stats?.byDetector || {};
     Object.entries(w1Det).forEach(([k, v]) => { if (v > 0) w1Cat[k] = v; });
 
     const w2Cat = {};
@@ -2573,10 +2573,10 @@ function renderDemoScenarios() {
             </div>
             <div class="demo-scenario-desc">${escapeHtml(s.description || '')}</div>
             <div class="demo-scenario-actions">
-                <button class="demo-btn demo-btn-wafon" data-scenario="${escapeHtml(s.id)}" data-waf="1" ${ready ? '' : 'disabled'}>
+                <button class="demo-btn demo-btn-wafon" data-scenario="${escapeHtml(s.id)}" data-waf="1" data-waflayer="${escapeHtml(s.wafLayer || 'WAF1')}" ${ready ? '' : 'disabled'}>
                     <span class="demo-btn-shield">🛡</span> WAF 开
                 </button>
-                <button class="demo-btn demo-btn-wafoff" data-scenario="${escapeHtml(s.id)}" data-waf="0" ${ready ? '' : 'disabled'}>
+                <button class="demo-btn demo-btn-wafoff" data-scenario="${escapeHtml(s.id)}" data-waf="0" data-waflayer="${escapeHtml(s.wafLayer || 'WAF1')}" ${ready ? '' : 'disabled'}>
                     <span class="demo-btn-shield demo-btn-shield-off">⊘</span> WAF 关
                 </button>
             </div>
@@ -2587,9 +2587,158 @@ function renderDemoScenarios() {
         btn.addEventListener('click', () => {
             const scenarioId = btn.dataset.scenario;
             const wafEnabled = btn.dataset.waf === '1';
+            const wafLayer = btn.dataset.waflayer || 'WAF1';
+            const scenario = demoScenarios.find((s) => s.id === scenarioId) || {};
+            showFlowchart(wafLayer, wafEnabled, scenario);
             runDemo(scenarioId, wafEnabled);
         });
     });
+}
+
+// ==================== 流程图视图 ====================
+
+function showFlowchart(wafLayer, wafEnabled, scenario) {
+    const listView = document.getElementById('demo-view-list');
+    const flowView = document.getElementById('demo-view-flow');
+    const flowStatus = document.getElementById('demo-flow-status');
+    const flowTitle = document.getElementById('demo-flow-title');
+    const flowContainer = document.getElementById('demo-flow-container');
+    if (!listView || !flowView || !flowStatus || !flowTitle || !flowContainer) return;
+
+    listView.style.display = 'none';
+    flowView.style.display = 'flex';
+    // 重启动画
+    flowView.style.animation = 'none';
+    flowView.offsetHeight; // reflow
+    flowView.style.animation = '';
+
+    // 状态徽标
+    flowStatus.className = `demo-flow-status ${wafEnabled ? 'waf-on' : 'waf-off'}`;
+    flowStatus.textContent = wafEnabled ? 'WAF ON' : 'WAF OFF';
+
+    // 根据 wafLayer 选择对应流程图模板
+    const isWaf1 = String(wafLayer).toLowerCase().includes('waf1');
+    if (isWaf1) {
+        flowTitle.textContent = scenario?.title ? `${scenario.title} · 攻击流程` : 'WAF1 场景 · Prompt Injection 致命三角';
+        flowContainer.innerHTML = renderWaf1Flowchart(wafEnabled);
+    } else {
+        flowTitle.textContent = scenario?.title ? `${scenario.title} · 攻击流程` : 'WAF2 场景 · 提示词注入外泄流程';
+        flowContainer.innerHTML = renderWaf2Flowchart(wafEnabled);
+    }
+}
+
+function backToDemoList() {
+    const listView = document.getElementById('demo-view-list');
+    const flowView = document.getElementById('demo-view-flow');
+    if (!listView || !flowView) return;
+    flowView.style.display = 'none';
+    listView.style.display = 'flex';
+}
+window.backToDemoList = backToDemoList;
+
+// ---- Demo 1: WAF1 Prompt Injection 致命三角 ----
+function renderWaf1Flowchart(wafEnabled) {
+    const arrowClass = wafEnabled ? 'green' : 'red';
+    const finalNode = wafEnabled
+        ? `<div class="flow-node flow-node-block">
+             <div class="flow-node-title">WAF1 拦截</div>
+             <div class="flow-node-sub">（调用链检测：读私有库 → 写公开库）</div>
+           </div>`
+        : `<div class="flow-node flow-node-pass">
+             <div class="flow-node-title">LLM 调 create_issue</div>
+             <div class="flow-node-sub">（PII 外泄到公开仓库）</div>
+           </div>`;
+
+    const wafArrowLabel = wafEnabled
+        ? `<div class="flow-arrow green flow-arrow-final"><span class="flow-arrow-label flow-arrow-label-good">WAF ON</span></div>`
+        : `<div class="flow-arrow red flow-arrow-final"><span class="flow-arrow-label flow-arrow-label-bad">WAF OFF</span></div>`;
+
+    return `
+    <div class="flow-chart-vertical">
+        <!-- WAF 状态左侧横条 -->
+        <div class="flow-vert-status-bar">
+            <span class="flow-node-waf ${wafEnabled ? 'waf-on' : 'waf-off'}">
+                ${wafEnabled ? 'WAF ON' : 'WAF OFF'}
+            </span>
+        </div>
+
+        <!-- 攻击注入点 -->
+        <div class="flow-node flow-node-attack">
+            <div class="flow-node-title">public-repo issue 中注入恶意 Prompt</div>
+            <div class="flow-node-sub">攻击者在公开仓库 issue 正文埋入操作指令</div>
+        </div>
+
+        <div class="flow-arrow"></div>
+
+        <!-- Agent 被诱导 -->
+        <div class="flow-node flow-node-llm">
+            <div class="flow-node-title">LLM 调 list_issues</div>
+            <div class="flow-node-sub">读取恶意 issue，被注入诱导</div>
+        </div>
+
+        <div class="flow-arrow purple"></div>
+
+        <!-- Agent 读私有库 -->
+        <div class="flow-node flow-node-llm">
+            <div class="flow-node-title">LLM 调 get_file_contents</div>
+            <div class="flow-node-sub">读私有库 salary.txt（含敏感 key）</div>
+        </div>
+
+        <!-- WAF 箭头 -->
+        ${wafArrowLabel}
+
+        <!-- 最终结果 -->
+        ${finalNode}
+    </div>`;
+}
+
+// ---- Demo 2: WAF2 提示词注入外泄 ----
+function renderWaf2Flowchart(wafEnabled) {
+    const arrowClass = wafEnabled ? 'green' : 'red';
+    const finalNode = wafEnabled
+        ? `<div class="flow-node flow-node-block">
+             <div class="flow-node-title">WAF2 拦截</div>
+             <div class="flow-node-sub">（body 含 sk-key）</div>
+           </div>`
+        : `<div class="flow-node flow-node-pass">
+             <div class="flow-node-title">sk-key 外泄成功</div>
+           </div>`;
+
+    return `
+    <div class="flow-chart-vertical">
+        <!-- WAF 状态左侧横条 -->
+        <div class="flow-vert-status-bar">
+            <span class="flow-node-waf ${wafEnabled ? 'waf-on' : 'waf-off'}">
+                ${wafEnabled ? 'WAF ON' : 'WAF OFF'}
+            </span>
+        </div>
+
+        <!-- 攻击节点 -->
+        <div class="flow-node flow-node-attack">
+            <div class="flow-node-title">进行提示词注入，诱导 Agent 外泄配置</div>
+        </div>
+
+        <div class="flow-arrow"></div>
+
+        <!-- WAF1 放行 -->
+        <div class="flow-node flow-node-allowed">
+            <div class="flow-node-title">WAF1 放行</div>
+            <div class="flow-node-sub">（无调用链）</div>
+        </div>
+
+        <div class="flow-arrow green"></div>
+
+        <!-- Agent 调 http_request -->
+        <div class="flow-node flow-node-llm">
+            <div class="flow-node-title">Agent 调 http_request</div>
+            <div class="flow-node-sub">POST 配置到目标网站</div>
+        </div>
+
+        <div class="flow-arrow ${arrowClass}"></div>
+
+        <!-- 最终结果 -->
+        ${finalNode}
+    </div>`;
 }
 
 async function runDemo(scenarioId, wafEnabled) {

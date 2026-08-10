@@ -5,9 +5,11 @@
 
 // ==================== 配置 ====================
 
+const _isLocalDev = location.hostname === 'localhost' || location.hostname === '127.0.0.1';
+
 const config = {
-    waf1Url: localStorage.getItem('waf1_url') || 'http://localhost:4000',
-    waf2Url: localStorage.getItem('waf2_url') || 'http://localhost:8081',
+    waf1Url: localStorage.getItem('waf1_url') || (_isLocalDev ? 'http://localhost:4000' : ''),
+    waf2Url: localStorage.getItem('waf2_url') || (_isLocalDev ? 'http://localhost:8081' : ''),
     refreshInterval: parseInt(localStorage.getItem('refresh_interval')) || 5000
 };
 
