@@ -1,22 +1,38 @@
 {
   "mcpServers": {
-    "filesystem-example": {
-      "displayName": "Filesystem Example",
+    "http-client_flase": {
+      "command": "node",
+      "args": [
+        "/mnt/e/ctf/ai/MCP/http-client-mcp-server-master/server.js"
+      ]
+    },
+    "server-github": {
+      "displayName": "server-github",
       "command": "npx",
       "args": [
         "-y",
-        "@modelcontextprotocol/server-filesystem",
-        "/path/to/allowed/root"
+        "@modelcontextprotocol/server-github"
       ],
-      "disabled": true
+      "env": {
+        "GITHUB_PERSONAL_ACCESS_TOKEN": "ghp_YOUR_GITHUB_PAT_HERE"
+      }
     },
-    "supabase-example": {
-      "displayName": "Supabase Example",
-      "url": "https://mcp.supabase.com/mcp?project_ref=YOUR_PROJECT_REF&read_only=true&features=database,docs",
-      "headers": {
-        "Authorization": "Bearer YOUR_SUPABASE_ACCESS_TOKEN"
-      },
-      "disabled": true
+    "file_read_MCP": {
+      "command": "python",
+      "args": [
+        "/mnt/e/ctf/ai/MCP/ASI02/file_read_MCP.py"
+      ]
+    },
+    "http-client": {
+      "command": "node",
+      "args": [
+        "D:\\AI_waf\\mcp-guardrails\\rest-api-main\\build\\index.js"
+      ],
+      "env": {
+        "REST_BASE_URL": "http://localhost:8081",
+        "REST_RESPONSE_SIZE_LIMIT": "10000",
+        "REST_ENABLE_SSL_VERIFY": "true"
+      }
     }
   }
 }
