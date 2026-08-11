@@ -1,6 +1,6 @@
 {
   "mcpServers": {
-    "http-client_flase": {
+    "http-client": {
       "command": "node",
       "args": [
         "/mnt/e/ctf/ai/MCP/http-client-mcp-server-master/server.js"
@@ -22,17 +22,6 @@
       "args": [
         "/mnt/e/ctf/ai/MCP/ASI02/file_read_MCP.py"
       ]
-    },
-    "http-client": {
-      "command": "node",
-      "args": [
-        "D:\\AI_waf\\mcp-guardrails\\rest-api-main\\build\\index.js"
-      ],
-      "env": {
-        "REST_BASE_URL": "http://localhost:8081",
-        "REST_RESPONSE_SIZE_LIMIT": "10000",
-        "REST_ENABLE_SSL_VERIFY": "true"
-      }
     }
   }
 }
