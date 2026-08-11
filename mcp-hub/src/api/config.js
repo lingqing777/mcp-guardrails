@@ -84,7 +84,7 @@ const defaultConfig = {
     llm: {
       provider: 'qwen',
       model: 'qwen-turbo',
-      baseUrl: 'https://ws-43ehngv7l1errso7.cn-beijing.maas.aliyuncs.com/compatible-mode/v1',
+      baseUrl: 'https://[YOUR WORKPLACE ID].cn-beijing.maas.aliyuncs.com/compatible-mode/v1',
       apiKey: '',
       timeout: 30000
     },
