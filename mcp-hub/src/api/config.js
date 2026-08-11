@@ -16,8 +16,54 @@ const __dirname = path.dirname(__filename);
 const CONFIG_FILE = process.env.GUARDRAILS_CONFIG ||
   path.resolve(__dirname, "../../../config/guardrails-config.json");
 
+// .env 文件路径 (项目根目录)
+const ENV_FILE = path.resolve(__dirname, "../../../.env");
+
 // WAF2 URL: Docker 环境用 waf2，本地用 localhost:8081
 const WAF2_URL = process.env.WAF2_URL || 'http://localhost:8081';
+
+/**
+ * 从 .env 文件加载环境变量 (不引入 dotenv 依赖)
+ * 支持 KEY=VALUE, KEY="VALUE", KEY='VALUE' 格式
+ * 忽略注释行和空行, 支持行内注释 (# 开头)
+ */
+function loadDotEnv() {
+  try {
+    if (!fs.existsSync(ENV_FILE)) {
+      console.error("[dotenv] .env file not found at:", ENV_FILE);
+      return;
+    }
+    const data = fs.readFileSync(ENV_FILE, 'utf-8');
+    let count = 0;
+    for (const line of data.split(/\r?\n/)) {
+      const trimmed = line.trim();
+      if (!trimmed || trimmed.startsWith('#')) continue;
+      const m = trimmed.match(/^(\w+)\s*=\s*(.*)$/);
+      if (!m) continue;
+      const key = m[1];
+      let value = m[2].trim();
+      if (value.startsWith('"')) {
+        const end = value.indexOf('"', 1);
+        value = end !== -1 ? value.slice(1, end) : value.slice(1);
+      } else if (value.startsWith("'")) {
+        const end = value.indexOf("'", 1);
+        value = end !== -1 ? value.slice(1, end) : value.slice(1);
+      } else {
+        const hashIdx = value.indexOf('#');
+        if (hashIdx !== -1 && value[hashIdx - 1] === ' ') {
+          value = value.slice(0, hashIdx).trim();
+        }
+      }
+      if (!(key in process.env)) {
+        process.env[key] = value;
+        count++;
+      }
+    }
+    console.error(`[dotenv] Loaded ${count} variables from .env`);
+  } catch (e) {
+    console.error('[dotenv] Failed to load .env:', e.message);
+  }
+}
 
 // 默认配置
 const defaultConfig = {
@@ -38,6 +84,7 @@ const defaultConfig = {
     llm: {
       provider: 'qwen',
       model: 'qwen-turbo',
+      baseUrl: 'https://ws-43ehngv7l1errso7.cn-beijing.maas.aliyuncs.com/compatible-mode/v1',
       apiKey: '',
       timeout: 30000
     },
@@ -66,8 +113,11 @@ function deepMerge(target, source) {
   return result;
 }
 
-// 加载配置 (优先级: 环境变量 > 配置文件 > 默认值)
+// 加载配置 (优先级: .env 文件 > 环境变量 > 配置文件 > 默认值)
 export function loadGuardrailsConfig() {
+  // 0. 先从 .env 文件加载环境变量到 process.env
+  loadDotEnv();
+
   let config = { ...defaultConfig };
 
   // 1. 先从配置文件加载
@@ -84,15 +134,33 @@ export function loadGuardrailsConfig() {
   // 2. 环境变量覆盖 (最高优先级)
   if (process.env.TARGET_URL) {
     config.waf2.upstream = process.env.TARGET_URL;
-    console.log(`[Config] 从环境变量加载 TARGET_URL: ${process.env.TARGET_URL}`);
   }
   if (process.env.QWEN_API_KEY) {
     config.waf2.llm.apiKey = process.env.QWEN_API_KEY;
-    console.log('[Config] 从环境变量加载 QWEN_API_KEY');
+    if (!config.demo) config.demo = {};
+    if (!config.demo.llmApiKey) config.demo.llmApiKey = process.env.QWEN_API_KEY;
   }
   if (process.env.LLM_MODEL) {
     config.waf2.llm.model = process.env.LLM_MODEL;
+    if (config.demo && !config.demo.agentModel) config.demo.agentModel = process.env.LLM_MODEL;
   }
+  if (process.env.LLM_BASE_URL) {
+    config.waf2.llm.baseUrl = process.env.LLM_BASE_URL;
+    if (!config.demo) config.demo = {};
+    config.demo.llmBaseUrl = process.env.LLM_BASE_URL;
+  }
+
+  // Startup diagnostics (console.error = always visible)
+  const key = config.waf2?.llm?.apiKey || "";
+  console.error("===== GUARDRAILS_CONFIG =====");
+  console.error("  waf2.upstream:", config.waf2?.upstream);
+  console.error("  waf2.llm.model:", config.waf2?.llm?.model);
+  console.error("  waf2.llm.baseUrl:", config.waf2?.llm?.baseUrl);
+  console.error("  waf2.llm.apiKey:", key ? key.slice(0, 7) + "..." : "EMPTY");
+  console.error("  demo.llmApiKey:", config.demo?.llmApiKey ? config.demo.llmApiKey.slice(0, 7) + "..." : "EMPTY");
+  console.error("  demo.llmBaseUrl:", config.demo?.llmBaseUrl || "(from waf2)");
+  console.error("  process.env.QWEN_API_KEY:", process.env.QWEN_API_KEY ? "SET" : "UNSET");
+  console.error("================================");
 
   return config;
 }
@@ -115,6 +183,7 @@ export async function syncToWaf2(waf2Config, retries = 2) {
     upstream: waf2Config.upstream,
     api_key: waf2Config.llm?.apiKey,
     model: waf2Config.llm?.model,
+    base_url: waf2Config.llm?.baseUrl,
     request_analysis: waf2Config.features?.requestAnalysis,
     response_analysis: waf2Config.features?.responseAnalysis,
     cache_enabled: waf2Config.features?.cache

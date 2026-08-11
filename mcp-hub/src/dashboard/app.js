@@ -38,7 +38,6 @@ const LLM_PROVIDERS = {
 let WAF1_URL = 'http://localhost:4000';
 let WAF2_URL = 'http://localhost:8081';
 let REFRESH_INTERVAL = 5000;
-const ATTACK_LOG_LIMIT = 60;
 let refreshTimer = null;
 
 // 数据存储
@@ -77,6 +76,7 @@ document.addEventListener('DOMContentLoaded', () => {
     refreshData();
     fetchMcpServers();
     startAutoRefresh();
+    initDemo();
 });
 
 // ==================== 主题切换 ====================
@@ -756,7 +756,7 @@ function updateDetectionsPanel() {
     const waf1Detections = waf1Data?.recentDetections || waf1Data?.recent_detections || [];
     const waf2Detections = waf2Data?.recent_detections || [];
 
-    allDetections = mergeDetections(waf1Detections, waf2Detections, ATTACK_LOG_LIMIT);
+    allDetections = mergeDetections(waf1Detections, waf2Detections, 50);
     renderDetectionList('all-detections', allDetections, 'all');
 }
 
@@ -2121,7 +2121,7 @@ async function monitorRefresh() {
 function startMonitorRefresh() {
     if (monitorTimer) return;
     monitorRefresh();
-    monitorTimer = setInterval(monitorRefresh, 2500);
+    monitorTimer = setInterval(monitorRefresh, 5000);
 }
 
 function stopMonitorRefresh() {
@@ -2162,7 +2162,7 @@ function monitorSeverityClass(sev) {
     return 'monitor-sev-info';
 }
 
-// 5.1 Attack Log Stream
+// 5.1 Attack Log Stream (增量更新: 复用已存在行, 避免全量重绘闪烁)
 function monitorUpdateLogStream(waf1, waf2) {
     const container = document.getElementById('monitor-log-stream');
     const emptyEl = document.getElementById('monitor-log-empty');
@@ -2170,17 +2170,13 @@ function monitorUpdateLogStream(waf1, waf2) {
     if (!container) return;
 
     const entries = [];
-    const getDetectionTime = (d) => d.timestamp || (d.ts ? new Date(d.ts).toISOString() : null) || d.labels?.timestamp || null;
-    const clearRows = () => {
-        Array.from(container.children).forEach(c => { if (c !== emptyEl) c.remove(); });
-    };
 
     if (waf1 && Array.isArray(waf1.recentDetections)) {
-        waf1.recentDetections.forEach((d, i) => {
-            const time = getDetectionTime(d);
+        waf1.recentDetections.forEach((d) => {
+            const t = d.ts || d.labels?.timestamp || d.timestamp;
             entries.push({
-                id: `w1-${d.ts || time || i}-${i}`,
-                time,
+                id: `w1-${d.ts || t}`,
+                time: t,
                 source: 'WAF1',
                 category: d.category || d.labels?.category || 'unknown',
                 severity: d.severity || d.labels?.severity || 'medium',
@@ -2190,11 +2186,10 @@ function monitorUpdateLogStream(waf1, waf2) {
     }
 
     if (waf2 && Array.isArray(waf2.recent_detections)) {
-        waf2.recent_detections.forEach((d, i) => {
-            const time = getDetectionTime(d);
+        waf2.recent_detections.forEach((d) => {
             entries.push({
-                id: `w2-${d.ts || time || i}-${i}`,
-                time,
+                id: `w2-${d.timestamp || d.ts}`,
+                time: d.timestamp || d.ts,
                 source: 'WAF2',
                 category: d.category || d.type || 'unknown',
                 severity: d.severity || 'medium',
@@ -2209,35 +2204,51 @@ function monitorUpdateLogStream(waf1, waf2) {
         return tb - ta;
     });
 
-    const display = entries.slice(0, ATTACK_LOG_LIMIT);
+    const display = entries.slice(0, 50);
     if (countEl) countEl.textContent = entries.length;
 
     if (display.length === 0) {
-        clearRows();
-        monitorPrevLogIds = new Set();
         if (emptyEl) emptyEl.style.display = 'flex';
         return;
     }
     if (emptyEl) emptyEl.style.display = 'none';
 
     const newIds = new Set(display.map(e => e.id));
-    const isNew = (id) => !monitorPrevLogIds.has(id);
 
-    const fragment = document.createDocumentFragment();
-    display.forEach(e => {
-        const row = document.createElement('div');
-        row.className = 'monitor-log-entry' + (isNew(e.id) ? ' flash' : '');
-        const srcClass = e.source === 'WAF1' ? 'monitor-log-source-waf1' : 'monitor-log-source-waf2';
-        row.innerHTML =
-            `<span class="monitor-log-time">${monitorFormatTime(e.time)}</span>` +
-            `<span class="monitor-log-source ${srcClass}">${e.source}</span>` +
-            `<span class="monitor-log-detail">${escapeHtml(e.category)}${e.reason ? ' — ' + escapeHtml(e.reason) : ''}</span>` +
-            `<span class="monitor-log-severity ${monitorSeverityClass(e.severity)}">${(e.severity || 'info').toUpperCase()}</span>`;
-        fragment.appendChild(row);
+    // 收集已存在的行 (按 data-id), 增量复用
+    const existing = new Map();
+    Array.from(container.children).forEach(c => {
+        if (c !== emptyEl && c.dataset.id) existing.set(c.dataset.id, c);
     });
 
-    clearRows();
-    container.insertBefore(fragment, emptyEl);
+    let prev = null;
+    display.forEach(e => {
+        let row = existing.get(e.id);
+        const srcClass = e.source === 'WAF1' ? 'monitor-log-source-waf1' : 'monitor-log-source-waf2';
+        if (row) {
+            // 已存在行: 不重写内容(避免重绘闪烁), 仅用于排序定位
+        } else {
+            // 新行: 创建并标记 flash 淡入
+            row = document.createElement('div');
+            row.dataset.id = e.id;
+            row.className = 'monitor-log-entry flash';
+            row.innerHTML =
+                `<span class="monitor-log-time">${monitorFormatTime(e.time)}</span>` +
+                `<span class="monitor-log-source ${srcClass}">${e.source}</span>` +
+                `<span class="monitor-log-detail">${escapeHtml(e.category)}${e.reason ? ' — ' + escapeHtml(e.reason) : ''}</span>` +
+                `<span class="monitor-log-severity ${monitorSeverityClass(e.severity)}">${(e.severity || 'info').toUpperCase()}</span>`;
+        }
+        // 按顺序就位 (移动已有元素不会触发重绘闪烁)
+        const desiredNext = prev ? prev.nextElementSibling : container.firstChild;
+        if (desiredNext !== row) {
+            if (prev) prev.insertAdjacentElement('afterend', row);
+            else container.insertBefore(row, emptyEl);
+        }
+        prev = row;
+    });
+
+    // 移除已不在列表的旧行
+    existing.forEach((el, id) => { if (!newIds.has(id)) el.remove(); });
     monitorPrevLogIds = newIds;
 }
 
@@ -2286,7 +2297,12 @@ function monitorUpdateTopology(waf1, waf2, servers) {
     monitorPrevWaf2Blocked = waf2Blocked;
 }
 
+const monitorAlertLast = {};
 function monitorTriggerNodeAlert(nodeId, lineId) {
+    // 节流: 同一节点 3s 内不重复触发 alert, 避免演示期间持续攻击导致节点狂闪
+    const now = Date.now();
+    if (monitorAlertLast[nodeId] && now - monitorAlertLast[nodeId] < 3000) return;
+    monitorAlertLast[nodeId] = now;
     const node = document.getElementById(nodeId);
     const line = document.getElementById(lineId);
     node?.classList.add('alert');
@@ -2307,7 +2323,10 @@ function monitorUpdateThreatLevel(waf1, waf2) {
     const rate = totalReqs > 0 ? Math.round(totalBlocked / totalReqs * 100) : 0;
 
     const rateEl = document.getElementById('monitor-block-rate');
-    if (rateEl) rateEl.innerHTML = `${rate}<span class="monitor-ring-unit">%</span>`;
+    if (rateEl && rateEl.dataset.rate !== String(rate)) {
+        rateEl.dataset.rate = String(rate);
+        rateEl.innerHTML = `${rate}<span class="monitor-ring-unit">%</span>`;
+    }
 
     const sev = { critical: 0, high: 0, medium: 0, low: 0 };
 
@@ -2436,9 +2455,9 @@ function monitorUpdateCompareChart(waf1, waf2) {
     if (w2El) monitorAnimateValue(w2El, parseInt(w2El.textContent) || 0, w2Total);
 
     const w1Cat = {};
-    const w1Rules = waf1?.stats?.byRule || waf1?.rules || waf1?.by_category || {};
+    const w1Rules = waf1?.last24h?.byCategory || waf1?.stats?.byRule || waf1?.by_category || {};
     Object.entries(w1Rules).forEach(([k, v]) => { if (v > 0) w1Cat[k] = v; });
-    const w1Det = waf1?.stats?.byDetector || {};
+    const w1Det = waf1?.detectors || waf1?.stats?.byDetector || {};
     Object.entries(w1Det).forEach(([k, v]) => { if (v > 0) w1Cat[k] = v; });
 
     const w2Cat = {};
@@ -2509,4 +2528,378 @@ function monitorUpdateCompareChart(waf1, waf2) {
         monitorCompareChart.data.datasets[1].data = w2Data;
         monitorCompareChart.update('none');
     }
+}
+
+// ==================== 演示 Tab 控制器 ====================
+
+let demoScenarios = [];
+let demoCurrentController = null;
+let demoLastRun = null; // { scenarioId, wafEnabled }
+
+function initDemo() {
+    loadDemoScenarios();
+    document.getElementById('demo-retry')?.addEventListener('click', () => {
+        if (demoLastRun) runDemo(demoLastRun.scenarioId, demoLastRun.wafEnabled);
+    });
+}
+
+async function loadDemoScenarios() {
+    const container = document.getElementById('demo-scenarios');
+    if (!container) return;
+    try {
+        const data = await api.demo.getScenarios();
+        demoScenarios = data.scenarios || [];
+        renderDemoScenarios();
+    } catch (e) {
+        container.innerHTML = `<div class="demo-loading">场景加载失败: ${escapeHtml(e.message)}</div>`;
+    }
+}
+
+function renderDemoScenarios() {
+    const container = document.getElementById('demo-scenarios');
+    if (!container) return;
+    if (!demoScenarios.length) {
+        container.innerHTML = '<div class="demo-loading">暂无场景</div>';
+        return;
+    }
+    container.innerHTML = demoScenarios.map((s) => {
+        const ready = s.ready !== false;
+        const wafLabel = s.wafLayer ? `防御层: ${escapeHtml(s.wafLayer)}` : '';
+        return `
+        <div class="demo-scenario-card${ready ? '' : ' demo-scenario-disabled'}">
+            <div class="demo-scenario-head">
+                <span class="demo-scenario-title">${escapeHtml(s.title)}</span>
+                ${wafLabel ? `<span class="demo-scenario-layer">${wafLabel}</span>` : ''}
+            </div>
+            <div class="demo-scenario-desc">${escapeHtml(s.description || '')}</div>
+            <div class="demo-scenario-actions">
+                <button class="demo-btn demo-btn-wafon" data-scenario="${escapeHtml(s.id)}" data-waf="1" data-waflayer="${escapeHtml(s.wafLayer || 'WAF1')}" ${ready ? '' : 'disabled'}>
+                    <span class="demo-btn-shield">🛡</span> WAF 开
+                </button>
+                <button class="demo-btn demo-btn-wafoff" data-scenario="${escapeHtml(s.id)}" data-waf="0" data-waflayer="${escapeHtml(s.wafLayer || 'WAF1')}" ${ready ? '' : 'disabled'}>
+                    <span class="demo-btn-shield demo-btn-shield-off">⊘</span> WAF 关
+                </button>
+            </div>
+        </div>`;
+    }).join('');
+
+    container.querySelectorAll('.demo-btn').forEach((btn) => {
+        btn.addEventListener('click', () => {
+            const scenarioId = btn.dataset.scenario;
+            const wafEnabled = btn.dataset.waf === '1';
+            const wafLayer = btn.dataset.waflayer || 'WAF1';
+            const scenario = demoScenarios.find((s) => s.id === scenarioId) || {};
+            showFlowchart(wafLayer, wafEnabled, scenario);
+            runDemo(scenarioId, wafEnabled);
+        });
+    });
+}
+
+// ==================== 流程图视图 ====================
+
+function showFlowchart(wafLayer, wafEnabled, scenario) {
+    const listView = document.getElementById('demo-view-list');
+    const flowView = document.getElementById('demo-view-flow');
+    const flowStatus = document.getElementById('demo-flow-status');
+    const flowTitle = document.getElementById('demo-flow-title');
+    const flowContainer = document.getElementById('demo-flow-container');
+    if (!listView || !flowView || !flowStatus || !flowTitle || !flowContainer) return;
+
+    listView.style.display = 'none';
+    flowView.style.display = 'flex';
+    // 重启动画
+    flowView.style.animation = 'none';
+    flowView.offsetHeight; // reflow
+    flowView.style.animation = '';
+
+    // 状态徽标
+    flowStatus.className = `demo-flow-status ${wafEnabled ? 'waf-on' : 'waf-off'}`;
+    flowStatus.textContent = wafEnabled ? 'WAF ON' : 'WAF OFF';
+
+    // 根据 wafLayer 选择对应流程图模板
+    const isWaf1 = String(wafLayer).toLowerCase().includes('waf1');
+    if (isWaf1) {
+        flowTitle.textContent = scenario?.title ? `${scenario.title} · 攻击流程` : 'WAF1 场景 · Prompt Injection 致命三角';
+        flowContainer.innerHTML = renderWaf1Flowchart(wafEnabled);
+    } else {
+        flowTitle.textContent = scenario?.title ? `${scenario.title} · 攻击流程` : 'WAF2 场景 · 提示词注入外泄流程';
+        flowContainer.innerHTML = renderWaf2Flowchart(wafEnabled);
+    }
+}
+
+function backToDemoList() {
+    const listView = document.getElementById('demo-view-list');
+    const flowView = document.getElementById('demo-view-flow');
+    if (!listView || !flowView) return;
+    flowView.style.display = 'none';
+    listView.style.display = 'flex';
+}
+window.backToDemoList = backToDemoList;
+
+// ---- Demo 1: WAF1 Prompt Injection 致命三角 ----
+function renderWaf1Flowchart(wafEnabled) {
+    const arrowClass = wafEnabled ? 'green' : 'red';
+    const finalNode = wafEnabled
+        ? `<div class="flow-node flow-node-block">
+             <div class="flow-node-title">WAF1 拦截</div>
+             <div class="flow-node-sub">（调用链检测：读私有库 → 写公开库）</div>
+           </div>`
+        : `<div class="flow-node flow-node-pass">
+             <div class="flow-node-title">LLM 调 create_issue</div>
+             <div class="flow-node-sub">（PII 外泄到公开仓库）</div>
+           </div>`;
+
+    const wafArrowLabel = wafEnabled
+        ? `<div class="flow-arrow green flow-arrow-final"><span class="flow-arrow-label flow-arrow-label-good">WAF ON</span></div>`
+        : `<div class="flow-arrow red flow-arrow-final"><span class="flow-arrow-label flow-arrow-label-bad">WAF OFF</span></div>`;
+
+    return `
+    <div class="flow-chart-vertical">
+        <!-- WAF 状态左侧横条 -->
+        <div class="flow-vert-status-bar">
+            <span class="flow-node-waf ${wafEnabled ? 'waf-on' : 'waf-off'}">
+                ${wafEnabled ? 'WAF ON' : 'WAF OFF'}
+            </span>
+        </div>
+
+        <!-- 攻击注入点 -->
+        <div class="flow-node flow-node-attack">
+            <div class="flow-node-title">public-repo issue 中注入恶意 Prompt</div>
+            <div class="flow-node-sub">攻击者在公开仓库 issue 正文埋入操作指令</div>
+        </div>
+
+        <div class="flow-arrow"></div>
+
+        <!-- Agent 被诱导 -->
+        <div class="flow-node flow-node-llm">
+            <div class="flow-node-title">LLM 调 list_issues</div>
+            <div class="flow-node-sub">读取恶意 issue，被注入诱导</div>
+        </div>
+
+        <div class="flow-arrow purple"></div>
+
+        <!-- Agent 读私有库 -->
+        <div class="flow-node flow-node-llm">
+            <div class="flow-node-title">LLM 调 get_file_contents</div>
+            <div class="flow-node-sub">读私有库 salary.txt（含敏感 key）</div>
+        </div>
+
+        <!-- WAF 箭头 -->
+        ${wafArrowLabel}
+
+        <!-- 最终结果 -->
+        ${finalNode}
+    </div>`;
+}
+
+// ---- Demo 2: WAF2 提示词注入外泄 ----
+function renderWaf2Flowchart(wafEnabled) {
+    const arrowClass = wafEnabled ? 'green' : 'red';
+    const finalNode = wafEnabled
+        ? `<div class="flow-node flow-node-block">
+             <div class="flow-node-title">WAF2 拦截</div>
+             <div class="flow-node-sub">（body 含 sk-key）</div>
+           </div>`
+        : `<div class="flow-node flow-node-pass">
+             <div class="flow-node-title">sk-key 外泄成功</div>
+           </div>`;
+
+    return `
+    <div class="flow-chart-vertical">
+        <!-- WAF 状态左侧横条 -->
+        <div class="flow-vert-status-bar">
+            <span class="flow-node-waf ${wafEnabled ? 'waf-on' : 'waf-off'}">
+                ${wafEnabled ? 'WAF ON' : 'WAF OFF'}
+            </span>
+        </div>
+
+        <!-- 攻击节点 -->
+        <div class="flow-node flow-node-attack">
+            <div class="flow-node-title">进行提示词注入，诱导 Agent 外泄配置</div>
+        </div>
+
+        <div class="flow-arrow"></div>
+
+        <!-- WAF1 放行 -->
+        <div class="flow-node flow-node-allowed">
+            <div class="flow-node-title">WAF1 放行</div>
+            <div class="flow-node-sub">（无调用链）</div>
+        </div>
+
+        <div class="flow-arrow green"></div>
+
+        <!-- Agent 调 http_request -->
+        <div class="flow-node flow-node-llm">
+            <div class="flow-node-title">Agent 调 http_request</div>
+            <div class="flow-node-sub">POST 配置到目标网站</div>
+        </div>
+
+        <div class="flow-arrow ${arrowClass}"></div>
+
+        <!-- 最终结果 -->
+        ${finalNode}
+    </div>`;
+}
+
+async function runDemo(scenarioId, wafEnabled) {
+    demoLastRun = { scenarioId, wafEnabled };
+    const body = document.getElementById('demo-chat-body');
+    const retryBtn = document.getElementById('demo-retry');
+    const label = document.getElementById('demo-chat-label');
+    const statusDot = document.getElementById('demo-status-dot');
+
+    // 取消上一次未完成的流
+    if (demoCurrentController) { try { demoCurrentController.abort(); } catch (e) {} }
+
+    const scenario = demoScenarios.find((s) => s.id === scenarioId) || {};
+    label.textContent = `${scenario.title || scenarioId} · ${wafEnabled ? 'WAF 开' : 'WAF 关'}`;
+    statusDot.className = 'demo-status-dot demo-status-running';
+    retryBtn.disabled = true;
+
+    body.innerHTML = '';
+    let assistantEl = null;
+    let assistantText = '';
+    const ensureThinking = () => {
+        // AI 思考中占位气泡 (三个跳动点), 首个 token 到来时替换为文字
+        if (!assistantEl) {
+            assistantEl = appendBubble(body, 'assistant');
+            assistantEl.classList.add('demo-thinking');
+            assistantEl.querySelector('.demo-bubble-text').innerHTML = '<span class="demo-thinking-dots"><i></i><i></i><i></i></span>';
+            body.scrollTop = body.scrollHeight;
+        }
+    };
+    const setAssistantText = (text) => {
+        if (!assistantEl) assistantEl = appendBubble(body, 'assistant');
+        assistantEl.classList.remove('demo-thinking');
+        assistantEl.querySelector('.demo-bubble-text').textContent = text;
+    };
+    const clearThinkingIfEmpty = () => {
+        // AI 未输出文字就进入下一步: 移除空的思考占位气泡
+        if (assistantEl && !assistantText) { assistantEl.remove(); assistantEl = null; }
+    };
+
+    try {
+        demoCurrentController = await api.demo.chat(scenarioId, wafEnabled, {
+            onEvent: (data) => {
+                switch (data.event) {
+                    case 'user':
+                        appendBubble(body, 'user').querySelector('.demo-bubble-text').textContent = data.text;
+                        ensureThinking();
+                        body.scrollTop = body.scrollHeight;
+                        break;
+                    case 'token':
+                        assistantText += data.text;
+                        setAssistantText(assistantText);
+                        body.scrollTop = body.scrollHeight;
+                        break;
+                    case 'tool_call':
+                        // 新一轮工具调用: 清掉空思考气泡, 重置 AI 文字气泡, 下次 token 进新气泡
+                        clearThinkingIfEmpty();
+                        assistantEl = null;
+                        assistantText = '';
+                        appendToolCard(body, data.tool, data.args, 'pending');
+                        body.scrollTop = body.scrollHeight;
+                        break;
+                    case 'waf':
+                        markLastToolWaf(body, data);
+                        break;
+                    case 'tool_result':
+                        markLastToolResult(body, data);
+                        body.scrollTop = body.scrollHeight;
+                        ensureThinking();
+                        break;
+                    case 'error':
+                        appendBubble(body, 'error').querySelector('.demo-bubble-text').textContent = data.message;
+                        break;
+                    case 'done':
+                        clearThinkingIfEmpty();
+                        if (data.note) {
+                            const n = appendBubble(body, 'note');
+                            n.querySelector('.demo-bubble-text').textContent = data.note;
+                        }
+                        break;
+                }
+            },
+            onDone: () => {
+                statusDot.className = 'demo-status-dot demo-status-idle';
+                retryBtn.disabled = false;
+            },
+            onError: (e) => {
+                appendBubble(body, 'error').querySelector('.demo-bubble-text').textContent = `连接失败: ${e.message}`;
+                statusDot.className = 'demo-status-dot demo-status-error';
+                retryBtn.disabled = false;
+            }
+        });
+    } catch (e) {
+        appendBubble(body, 'error').querySelector('.demo-bubble-text').textContent = `启动失败: ${e.message}`;
+        statusDot.className = 'demo-status-dot demo-status-error';
+        retryBtn.disabled = false;
+    }
+}
+
+function appendBubble(container, role) {
+    const el = document.createElement('div');
+    el.className = `demo-bubble demo-bubble-${role}`;
+    const labelMap = { user: '用户', assistant: 'AI', error: '错误', note: '提示', stream: '' };
+    const label = labelMap[role];
+    el.innerHTML = (label ? `<div class="demo-bubble-role">${label}</div>` : '') +
+        `<div class="demo-bubble-text"></div>`;
+    container.appendChild(el);
+    return el;
+}
+
+function appendToolCard(container, tool, args, state) {
+    const el = document.createElement('div');
+    el.className = 'demo-tool-card demo-tool-pending';
+    const argPreview = (() => {
+        try { return JSON.stringify(args); } catch (e) { return String(args); }
+    })();
+    el.innerHTML = `
+        <div class="demo-tool-head">
+            <span class="demo-tool-icon">🔧</span>
+            <span class="demo-tool-name">${escapeHtml(tool)}</span>
+            <span class="demo-tool-state">执行中…</span>
+        </div>
+        <pre class="demo-tool-args">${escapeHtml(argPreview)}</pre>
+        <div class="demo-tool-waf"></div>
+        <div class="demo-tool-result"></div>`;
+    container.appendChild(el);
+    return el;
+}
+
+function markLastToolWaf(container, data) {
+    const cards = container.querySelectorAll('.demo-tool-card');
+    const card = cards[cards.length - 1];
+    if (!card) return;
+    const wafEl = card.querySelector('.demo-tool-waf');
+    card.classList.remove('demo-tool-pending');
+    const layer = data.layer || 'WAF1';
+    const verdictHtml = data.verdict === 'blocked'
+        ? `<span class="demo-verdict demo-verdict-blocked">⛔ ${escapeHtml(layer)} 拦截</span> <span class="demo-verdict-reason">${escapeHtml(data.reason || '')}</span> <span class="demo-verdict-cat">${escapeHtml(data.category || '')}</span>`
+        : `<span class="demo-verdict demo-verdict-allowed">✅ ${escapeHtml(layer)} 放行</span> <span class="demo-verdict-reason">${escapeHtml(data.reason || '')}</span>`;
+    // 追加: 同一工具卡可能含 WAF1 + WAF2 两个 verdict (展示 WAF1 漏 / WAF2 拦)
+    wafEl.innerHTML = (wafEl.innerHTML ? wafEl.innerHTML + ' ' : '') + verdictHtml;
+    if (data.verdict === 'blocked') {
+        card.classList.remove('demo-tool-allowed');
+        card.classList.add('demo-tool-blocked');
+    } else if (!card.classList.contains('demo-tool-blocked')) {
+        card.classList.add('demo-tool-allowed');
+    }
+}
+
+function markLastToolResult(container, data) {
+    const cards = container.querySelectorAll('.demo-tool-card');
+    const card = cards[cards.length - 1];
+    if (!card) return;
+    const stateEl = card.querySelector('.demo-tool-state');
+    const resEl = card.querySelector('.demo-tool-result');
+    const blocked = data.blocked;
+    stateEl.textContent = blocked ? '已拦截' : '已返回';
+    const content = data.content || data.preview || '';
+    if (content) resEl.innerHTML = `<pre class="demo-tool-result-pre">${escapeHtml(content)}</pre>`;
+}
+
+function truncateStr(s, n) {
+    s = String(s ?? '');
+    return s.length > n ? s.slice(0, n) + '…' : s;
 }

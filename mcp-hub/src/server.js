@@ -47,6 +47,7 @@ import {
   registerWorkspacesRoute,
   registerRestartRoutes,
   registerMcpConfigRoutes,
+  registerDemoRoutes,
 } from "./api/index.js";
 
 // WAF1 中间件
@@ -191,6 +192,11 @@ registerWaf1Routes(app, getConfig, setConfig, saveGuardrailsConfig, applyWaf1Con
 
 // MCP Server 配置管理 API (CRUD)
 registerMcpConfigRoutes(app);
+
+// 演示聊天 API (SSE Agent loop) — 必须在 WAF1 中间件之前注册,
+// 否则 demo chat 自身请求会被 WAF1 拦截; 工具调用的 WAF 检测由 demo.js
+// 按 wafEnabled 标志显式调用 validateToolCall 触发 (逐次旁路编排)
+registerDemoRoutes(app, getConfig, getServiceManager);
 
 // WAF1 中间件 (在 WAF1 API 之后，其他路由之前)
 app.use("/api", waf1Middleware);

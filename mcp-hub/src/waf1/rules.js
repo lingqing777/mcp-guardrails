@@ -203,62 +203,6 @@ export const DEFAULT_RULES_ENABLED = {
   injectionOther: true,
 };
 
-const RULE_PRIORITY = [
-  'sensitiveFiles',
-  'pathTraversal',
-  'ssrf',
-  'shellInjection',
-  'sqlInjection',
-  'dataExfiltration',
-  'protocolAttacks',
-  'xss',
-  'dangerousOperations',
-  'injectionOther',
-];
-
-function previewValue(value, limit = 120) {
-  const text = String(value ?? '');
-  return text.length > limit ? `${text.slice(0, limit)}...` : text;
-}
-
-/**
- * Extract string leaf values from an arbitrary MCP tool argument object.
- *
- * MCP tool parameters are structured JSON objects. Running every rule against
- * one large JSON string loses the parameter path that caused the block and can
- * make business-policy debugging difficult. This helper keeps the scan cheap
- * while preserving enough context for audit logs and reports.
- */
-export function extractStringLeafNodes(value, path = '$', out = [], depth = 0) {
-  if (depth > 12) {
-    out.push({ path, value: previewValue(JSON.stringify(value)) });
-    return out;
-  }
-
-  if (typeof value === 'string') {
-    out.push({ path, value });
-    return out;
-  }
-
-  if (typeof value === 'number' || typeof value === 'boolean') {
-    out.push({ path, value: String(value) });
-    return out;
-  }
-
-  if (Array.isArray(value)) {
-    value.forEach((item, idx) => extractStringLeafNodes(item, `${path}[${idx}]`, out, depth + 1));
-    return out;
-  }
-
-  if (value && typeof value === 'object') {
-    for (const [key, item] of Object.entries(value)) {
-      extractStringLeafNodes(item, `${path}.${key}`, out, depth + 1);
-    }
-  }
-
-  return out;
-}
-
 /**
  * 正则规则检测
  * @param {object} args - 请求参数
@@ -268,23 +212,13 @@ export function extractStringLeafNodes(value, path = '$', out = [], depth = 0) {
  * @returns {object} { allowed, reason, type, category }
  */
 export function checkRules(args, rules = RULES, rulesEnabled = DEFAULT_RULES_ENABLED, options = {}) {
+  const argsStr = JSON.stringify(args);
   const tool = String(options.tool || '').toLowerCase();
   const isSqlAdminTool = /(^|__)execute_sql$/.test(tool) &&
     typeof args === 'object' &&
     typeof (args?.sql || args?.query || args?.statement) === 'string';
 
-  const leafValues = extractStringLeafNodes(args);
-  const scanValues = leafValues.length > 0
-    ? leafValues
-    : [{ path: '$', value: JSON.stringify(args || {}) }];
-
-  const orderedCategories = [
-    ...RULE_PRIORITY.filter((category) => rules[category]),
-    ...Object.keys(rules).filter((category) => !RULE_PRIORITY.includes(category)),
-  ];
-
-  for (const category of orderedCategories) {
-    const patterns = rules[category] || [];
+  for (const [category, patterns] of Object.entries(rules)) {
     // 检查该规则是否启用
     if (rulesEnabled && rulesEnabled[category] === false) {
       continue;
@@ -294,18 +228,13 @@ export function checkRules(args, rules = RULES, rulesEnabled = DEFAULT_RULES_ENA
     }
 
     for (const pattern of patterns) {
-      for (const item of scanValues) {
-        const regex = new RegExp(pattern.source, pattern.flags);
-        if (regex.test(item.value)) {
-          return {
-            allowed: false,
-            reason: `检测到 ${category}: ${pattern}`,
-            type: "RULE_BLOCKED",
-            category,
-            valuePath: item.path,
-            valuePreview: previewValue(item.value),
-          };
-        }
+      if (pattern.test(argsStr)) {
+        return {
+          allowed: false,
+          reason: `检测到 ${category}: ${pattern}`,
+          type: "RULE_BLOCKED",
+          category,
+        };
       }
     }
   }
